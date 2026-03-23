@@ -1,81 +1,28 @@
 name: Build Linux Binary
-
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
-
 jobs:
   build-linux:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y python3-tk
-
-      - name: Install Python dependencies
-        run: |
-          pip install --upgrade pip
-          pip install pyinstaller customtkinter pdfplumber pandas matplotlib requests openpyxl pillow
-
-      - name: Build Linux binary
-        run: |
-          pyinstaller --onefile --windowed \
-            --name "ResultAnalyzer" \
-            --hidden-import=pdfplumber \
-            --hidden-import=pdfminer \
-            --hidden-import=pdfminer.high_level \
-            --hidden-import=pdfminer.layout \
-            --hidden-import=pdfminer.converter \
-            --hidden-import=pdfminer.pdfinterp \
-            --hidden-import=pdfminer.pdfdevice \
-            --hidden-import=customtkinter \
-            --hidden-import=openpyxl \
-            --hidden-import=openpyxl.styles \
-            --hidden-import=pandas \
-            --hidden-import=pandas.io.formats.excel \
-            --hidden-import=matplotlib \
-            --hidden-import=matplotlib.backends.backend_tkagg \
-            --hidden-import=requests \
-            --hidden-import=charset_normalizer \
-            --hidden-import=PIL \
-            --collect-all customtkinter \
-            --collect-all pdfplumber \
-            --collect-all pdfminer \
-            app.py
-
-      - name: Create .deb package
-        run: |
-          mkdir -p pkg/DEBIAN
-          mkdir -p pkg/usr/local/bin
-          mkdir -p pkg/usr/share/applications
-          cp dist/ResultAnalyzer pkg/usr/local/bin/ResultAnalyzer
+      - run: sudo apt-get update && sudo apt-get install -y python3-tk
+      - run: pip install pyinstaller customtkinter pdfplumber pandas matplotlib requests openpyxl pillow
+      - run: pyinstaller --onefile --name "ResultAnalyzer" --hidden-import=pdfplumber --hidden-import=pdfminer --hidden-import=pdfminer.high_level --hidden-import=customtkinter --hidden-import=openpyxl --hidden-import=pandas --hidden-import=matplotlib --hidden-import=matplotlib.backends.backend_tkagg --hidden-import=requests --collect-all customtkinter --collect-all pdfplumber app.py
+      - run: |
+          mkdir -p pkg/DEBIAN pkg/usr/local/bin
+          cp dist/ResultAnalyzer pkg/usr/local/bin/
           chmod +x pkg/usr/local/bin/ResultAnalyzer
-          echo "Package: result-analyzer" > pkg/DEBIAN/control
-          echo "Version: 1.0.0" >> pkg/DEBIAN/control
-          echo "Architecture: amd64" >> pkg/DEBIAN/control
-          echo "Maintainer: Developer <dev@email.com>" >> pkg/DEBIAN/control
-          echo "Description: College Result Analyzer" >> pkg/DEBIAN/control
-          echo "[Desktop Entry]" > pkg/usr/share/applications/result-analyzer.desktop
-          echo "Name=Result Analyzer" >> pkg/usr/share/applications/result-analyzer.desktop
-          echo "Exec=/usr/local/bin/ResultAnalyzer" >> pkg/usr/share/applications/result-analyzer.desktop
-          echo "Terminal=false" >> pkg/usr/share/applications/result-analyzer.desktop
-          echo "Type=Application" >> pkg/usr/share/applications/result-analyzer.desktop
+          printf "Package: result-analyzer\nVersion: 1.0.0\nArchitecture: amd64\nMaintainer: Dev <dev@email.com>\nDescription: Result Analyzer\n" > pkg/DEBIAN/control
           dpkg-deb --build pkg result-analyzer_1.0.0.deb
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3
         with:
           name: ResultAnalyzer-Linux
           path: |
             dist/ResultAnalyzer
             result-analyzer_1.0.0.deb
-          retention-days: 30
