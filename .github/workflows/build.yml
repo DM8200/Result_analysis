@@ -1,0 +1,104 @@
+name: Build Linux Binary
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:   # allows manual trigger from GitHub website
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyinstaller
+          pip install customtkinter
+          pip install pdfplumber
+          pip install pandas
+          pip install matplotlib
+          pip install requests
+          pip install openpyxl
+          pip install pillow
+
+      - name: Build Linux binary
+        run: |
+          pyinstaller --onefile --windowed \
+            --name "ResultAnalyzer" \
+            --hidden-import=pdfplumber \
+            --hidden-import=pdfminer \
+            --hidden-import=pdfminer.high_level \
+            --hidden-import=pdfminer.layout \
+            --hidden-import=pdfminer.converter \
+            --hidden-import=pdfminer.pdfinterp \
+            --hidden-import=pdfminer.pdfdevice \
+            --hidden-import=customtkinter \
+            --hidden-import=openpyxl \
+            --hidden-import=openpyxl.styles \
+            --hidden-import=openpyxl.styles.fills \
+            --hidden-import=openpyxl.styles.fonts \
+            --hidden-import=openpyxl.styles.alignment \
+            --hidden-import=pandas \
+            --hidden-import=pandas.io.formats.excel \
+            --hidden-import=matplotlib \
+            --hidden-import=matplotlib.backends.backend_tkagg \
+            --hidden-import=matplotlib.figure \
+            --hidden-import=requests \
+            --hidden-import=charset_normalizer \
+            --hidden-import=PIL \
+            --collect-all customtkinter \
+            --collect-all pdfplumber \
+            --collect-all pdfminer \
+            app.py
+
+      - name: Create .deb package
+        run: |
+          mkdir -p result-analyzer_1.0.0/DEBIAN
+          mkdir -p result-analyzer_1.0.0/usr/local/bin
+          mkdir -p result-analyzer_1.0.0/usr/share/applications
+
+          cp dist/ResultAnalyzer result-analyzer_1.0.0/usr/local/bin/
+          chmod +x result-analyzer_1.0.0/usr/local/bin/ResultAnalyzer
+
+          cat > result-analyzer_1.0.0/DEBIAN/control << EOF
+          Package: result-analyzer
+          Version: 1.0.0
+          Architecture: amd64
+          Maintainer: Your Name <your@email.com>
+          Description: College Result Analyzer
+           Professional result analysis software for colleges.
+          EOF
+
+          cat > result-analyzer_1.0.0/usr/share/applications/result-analyzer.desktop << EOF
+          [Desktop Entry]
+          Name=Result Analyzer
+          Exec=/usr/local/bin/ResultAnalyzer
+          Terminal=false
+          Type=Application
+          Categories=Education;
+          EOF
+
+          dpkg-deb --build result-analyzer_1.0.0
+
+      - name: Upload Linux binary
+        uses: actions/upload-artifact@v3
+        with:
+          name: ResultAnalyzer-Linux
+          path: |
+            dist/ResultAnalyzer
+            result-analyzer_1.0.0.deb
+          retention-days: 30
