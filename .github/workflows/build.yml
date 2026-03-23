@@ -1,28 +1,74 @@
 name: Build Linux Binary
+
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
+
 jobs:
-  build-linux:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: sudo apt-get update && sudo apt-get install -y python3-tk
-      - run: pip install pyinstaller customtkinter pdfplumber pandas matplotlib requests openpyxl pillow
-      - run: pyinstaller --onefile --name "ResultAnalyzer" --hidden-import=pdfplumber --hidden-import=pdfminer --hidden-import=pdfminer.high_level --hidden-import=customtkinter --hidden-import=openpyxl --hidden-import=pandas --hidden-import=matplotlib --hidden-import=matplotlib.backends.backend_tkagg --hidden-import=requests --collect-all customtkinter --collect-all pdfplumber app.py
-      - run: |
-          mkdir -p pkg/DEBIAN pkg/usr/local/bin
-          cp dist/ResultAnalyzer pkg/usr/local/bin/
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyinstaller customtkinter pdfplumber pandas matplotlib requests openpyxl pillow
+
+      - name: Build Linux binary
+        run: |
+          pyinstaller --onefile --name "ResultAnalyzer" \
+            --hidden-import=pdfplumber \
+            --hidden-import=pdfminer \
+            --hidden-import=pdfminer.high_level \
+            --hidden-import=pdfminer.layout \
+            --hidden-import=pdfminer.converter \
+            --hidden-import=pdfminer.pdfinterp \
+            --hidden-import=pdfminer.pdfdevice \
+            --hidden-import=customtkinter \
+            --hidden-import=openpyxl \
+            --hidden-import=openpyxl.styles \
+            --hidden-import=pandas \
+            --hidden-import=pandas.io.formats.excel \
+            --hidden-import=matplotlib \
+            --hidden-import=matplotlib.backends.backend_tkagg \
+            --hidden-import=requests \
+            --hidden-import=charset_normalizer \
+            --hidden-import=PIL \
+            --collect-all customtkinter \
+            --collect-all pdfplumber \
+            --collect-all pdfminer \
+            app.py
+
+      - name: Create .deb package
+        run: |
+          mkdir -p pkg/DEBIAN
+          mkdir -p pkg/usr/local/bin
+          mkdir -p pkg/usr/share/applications
+          cp dist/ResultAnalyzer pkg/usr/local/bin/ResultAnalyzer
           chmod +x pkg/usr/local/bin/ResultAnalyzer
-          printf "Package: result-analyzer\nVersion: 1.0.0\nArchitecture: amd64\nMaintainer: Dev <dev@email.com>\nDescription: Result Analyzer\n" > pkg/DEBIAN/control
+          printf "Package: result-analyzer\nVersion: 1.0.0\nArchitecture: amd64\nMaintainer: Developer <dev@email.com>\nDescription: College Result Analyzer\n" > pkg/DEBIAN/control
+          printf "[Desktop Entry]\nName=Result Analyzer\nExec=/usr/local/bin/ResultAnalyzer\nTerminal=false\nType=Application\nCategories=Education;\n" > pkg/usr/share/applications/result-analyzer.desktop
           dpkg-deb --build pkg result-analyzer_1.0.0.deb
-      - uses: actions/upload-artifact@v3
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
           name: ResultAnalyzer-Linux
           path: |
             dist/ResultAnalyzer
             result-analyzer_1.0.0.deb
+          retention-days: 30
