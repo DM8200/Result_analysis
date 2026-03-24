@@ -3,11 +3,12 @@ keygen.py  –  Remote License Key Generator for College Result Analyzer
 Run this on YOUR computer to create/list/revoke keys on your server.
 No file copying needed — keys are saved directly on the server.
 
-Install:  pip install requests
+Install:  pip install requests tabulate
 Usage:    python keygen.py
 """
 
 import requests
+from tabulate import tabulate
 
 # ─────────────────── CONFIG — change these two lines ───────────────────────
 SERVER_URL   = "https://license-server-p81y.onrender.com"    # ← your Render URL
@@ -86,13 +87,20 @@ def list_keys():
         print("  (no licenses yet)")
         return
 
-    print(f"\n  {'KEY':<25} {'CUSTOMER':<20} {'COLLEGE':<25} {'PLAN':<12} {'EXPIRES':<22} {'ACTIVE':<8} {'REVOKED'}")
-    print("  " + "─" * 120)
-    for lic in licenses:
-        print(
-            f"  {lic['key']:<25} {lic['customer']:<20} {lic.get('college',''):<25} {lic['plan']:<12} "
-            f"{lic['expires_at']:<22} {lic['activated']:<8} {lic['revoked']}"
-        )
+    headers = ["KEY", "CUSTOMER", "COLLEGE", "PLAN", "EXPIRES", "ACTIVE", "REVOKED"]
+    rows = [
+        [
+            lic['key'],
+            lic['customer'],
+            lic.get('college', ''),
+            lic['plan'],
+            lic['expires_at'],
+            str(lic['activated']),
+            str(lic['revoked'])
+        ]
+        for lic in licenses
+    ]
+    print(tabulate(rows, headers=headers, tablefmt="grid"))
     print()
 
 
