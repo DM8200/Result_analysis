@@ -26,7 +26,14 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install pyinstaller customtkinter pdfplumber pandas matplotlib requests openpyxl pillow
+          pip install pyinstaller
+          pip install customtkinter
+          pip install pdfplumber
+          pip install pandas
+          pip install matplotlib
+          pip install requests
+          pip install openpyxl
+          pip install pillow
 
       - name: Build Linux binary
         run: |
