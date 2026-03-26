@@ -119,7 +119,7 @@ jobs:
           #!/bin/bash
           export LC_ALL=C.UTF-8
           export LANG=C.UTF-8
-          export DISPLAY=${DISPLAY:-:0}
+          export DISPLAY=${DISPLAY:-:1}
           export GDK_BACKEND=x11
           export LIBGL_ALWAYS_SOFTWARE=1
           if [ -d /usr/share/tcltk/tcl8.6 ]; then
