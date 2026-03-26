@@ -100,9 +100,86 @@ jobs:
               print("Icons created!")
           PYEOF
 
-                - name: Create .deb package
-                  run: |
-                    mkdir -p pkg/DEBIAN
+      - name: Create .deb package
+        run: |
+          mkdir -p pkg/DEBIAN
+          mkdir -p pkg/usr/local/bin
+          mkdir -p pkg/usr/share/applications
+          mkdir -p pkg/usr/share/pixmaps
+          mkdir -p pkg/usr/share/icons/hicolor/256x256/apps
+          mkdir -p pkg/usr/share/icons/hicolor/128x128/apps
+          mkdir -p pkg/usr/share/icons/hicolor/64x64/apps
+          mkdir -p pkg/usr/share/icons/hicolor/48x48/apps
+          mkdir -p pkg/usr/share/icons/hicolor/32x32/apps
+
+          cp dist/ResultAnalyzer pkg/usr/local/bin/result-analyzer-bin
+          chmod +x pkg/usr/local/bin/result-analyzer-bin
+
+          cat > pkg/usr/local/bin/ResultAnalyzer << 'WRAPPER'
+          #!/bin/bash
+          export LC_ALL=C.UTF-8
+          export LANG=C.UTF-8
+          export DISPLAY=${DISPLAY:-:0}
+          export GDK_BACKEND=x11
+          export LIBGL_ALWAYS_SOFTWARE=1
+          if [ -d /usr/share/tcltk/tcl8.6 ]; then
+            export TCL_LIBRARY=/usr/share/tcltk/tcl8.6
+          fi
+          if [ -d /usr/share/tcltk/tk8.6 ]; then
+            export TK_LIBRARY=/usr/share/tcltk/tk8.6
+          fi
+          exec /usr/local/bin/result-analyzer-bin "$@"
+          WRAPPER
+          chmod +x pkg/usr/local/bin/ResultAnalyzer
+
+          if [ -f "logo.png" ]; then
+            cp logo.png pkg/usr/share/pixmaps/result-analyzer.png
+          fi
+
+          for size in 256x256 128x128 64x64 48x48 32x32; do
+            if [ -f "icons/${size}/result-analyzer.png" ]; then
+              cp "icons/${size}/result-analyzer.png" "pkg/usr/share/icons/hicolor/${size}/apps/result-analyzer.png"
+            fi
+          done
+
+          cat > pkg/usr/share/applications/result-analyzer.desktop << 'DESKTOP'
+          [Desktop Entry]
+          Version=1.0
+          Type=Application
+          Name=College Result Analyzer
+          Comment=Professional result analysis software
+          Exec=ResultAnalyzer
+          Icon=result-analyzer
+          Terminal=false
+          Categories=Education;Office;
+          StartupNotify=true
+          DESKTOP
+
+          echo "Package: result-analyzer" > pkg/DEBIAN/control
+          echo "Version: 1.0.0" >> pkg/DEBIAN/control
+          echo "Architecture: amd64" >> pkg/DEBIAN/control
+          echo "Maintainer: Developer <dev@email.com>" >> pkg/DEBIAN/control
+          echo "Depends: libx11-6, libglib2.0-0, libgl1-mesa-glx, python3-tk, libfreetype6, libfontconfig1" >> pkg/DEBIAN/control
+          echo "Description: College Result Analyzer" >> pkg/DEBIAN/control
+          echo " Professional result analysis software for colleges." >> pkg/DEBIAN/control
+
+          echo "#!/bin/bash" > pkg/DEBIAN/postinst
+          echo "set -e" >> pkg/DEBIAN/postinst
+          echo "update-desktop-database /usr/share/applications 2>/dev/null || true" >> pkg/DEBIAN/postinst
+          echo "gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true" >> pkg/DEBIAN/postinst
+          echo "exit 0" >> pkg/DEBIAN/postinst
+          chmod +x pkg/DEBIAN/postinst
+
+          dpkg-deb --build pkg result-analyzer_1.0.0.deb
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ResultAnalyzer-Linux
+          path: |
+            dist/ResultAnalyzer
+            result-analyzer_1.0.0.deb
+          retention-days: 30
                     mkdir -p pkg/usr/local/bin
                     mkdir -p pkg/usr/share/applications
                     mkdir -p pkg/usr/share/pixmaps
