@@ -29,7 +29,10 @@ jobs:
             libc6 \
             libgl1-mesa-glx \
             libxrender1 \
-            libxext6
+            libxext6 \
+            libfreetype6 \
+            libfontconfig1 \
+            fontconfig-config
 
       - name: Install Python dependencies
         run: |
@@ -57,6 +60,8 @@ jobs:
             --collect-all customtkinter \
             --collect-all pdfplumber \
             --collect-all pdfminer \
+            --collect-all matplotlib \
+            --collect-all pandas \
             app.py
 
       - name: Resize icons
@@ -70,12 +75,19 @@ jobs:
               print("logo.png not found, skipping icon resize")
           else:
               img = Image.open("logo.png")
-              sizes = [256,128,64,48]
+              sizes = [256, 128, 64, 48, 32]
               for size in sizes:
                   folder = f"icons/{size}x{size}"
                   os.makedirs(folder, exist_ok=True)
-                  img.resize((size,size), Image.LANCZOS).save(f"{folder}/result-analyzer.png")
-              print("Icons created!")
+                  resized = img.resize((size, size), Image.LANCZOS)
+                  resized.save(f"{folder}/result-analyzer.png")
+              print("Icons created successfully!")
+              
+              # Verify icons were created
+              for size in sizes:
+                  path = f"icons/{size}x{size}/result-analyzer.png"
+                  if os.path.exists(path):
+                      print(f"✓ Created {path}")
           EOF
 
       - name: Create deb package
@@ -84,27 +96,94 @@ jobs:
           mkdir -p pkg/usr/local/bin
           mkdir -p pkg/usr/share/applications
           mkdir -p pkg/usr/share/pixmaps
-          mkdir -p pkg/usr/share/icons/hicolor/256x256/apps
-          mkdir -p pkg/usr/share/icons/hicolor/128x128/apps
-          mkdir -p pkg/usr/share/icons/hicolor/64x64/apps
-          mkdir -p pkg/usr/share/icons/hicolor/48x48/apps
+          mkdir -p pkg/usr/share/icons/hicolor/{256x256,128x128,64x64,48x48,32x32}/apps
 
-          cp dist/ResultAnalyzer pkg/usr/local/bin/ResultAnalyzer
+          # Copy the binary
+          cp dist/ResultAnalyzer pkg/usr/local/bin/result-analyzer-bin
+          chmod +x pkg/usr/local/bin/result-analyzer-bin
+
+          # Create wrapper script with proper environment setup
+          cat > pkg/usr/local/bin/ResultAnalyzer << 'WRAPPER'
+          #!/bin/bash
+          # ResultAnalyzer wrapper script - Sets up proper environment for Tcl/Tk
+          
+          # Ensure proper locale
+          export LC_ALL=C.UTF-8
+          export LANG=C.UTF-8
+          
+          # Set Tcl/Tk library paths if they exist
+          if [ -d /usr/share/tcltk/tcl8.6 ]; then
+            export TCL_LIBRARY=/usr/share/tcltk/tcl8.6
+          fi
+          if [ -d /usr/share/tcltk/tk8.6 ]; then
+            export TK_LIBRARY=/usr/share/tcltk/tk8.6
+          fi
+          
+          # Run the application
+          exec /usr/local/bin/result-analyzer-bin "$@"
+          WRAPPER
           chmod +x pkg/usr/local/bin/ResultAnalyzer
 
+          # Copy icons
           if [ -f logo.png ]; then
+            # Copy to pixmaps for fallback
             cp logo.png pkg/usr/share/pixmaps/result-analyzer.png
-            cp icons/256x256/result-analyzer.png pkg/usr/share/icons/hicolor/256x256/apps/result-analyzer.png
-            cp icons/128x128/result-analyzer.png pkg/usr/share/icons/hicolor/128x128/apps/result-analyzer.png
-            cp icons/64x64/result-analyzer.png pkg/usr/share/icons/hicolor/64x64/apps/result-analyzer.png
-            cp icons/48x48/result-analyzer.png pkg/usr/share/icons/hicolor/48x48/apps/result-analyzer.png
+            echo "✓ Copied logo to pixmaps"
           fi
+
+          # Copy all icon sizes
+          for size in 256x256 128x128 64x64 48x48 32x32; do
+            if [ -f "icons/${size}/result-analyzer.png" ]; then
+              cp "icons/${size}/result-analyzer.png" "pkg/usr/share/icons/hicolor/${size}/apps/result-analyzer.png"
+              echo "✓ Copied icon ${size}"
+            fi
+          done
+
+          # Create desktop file for menu integration
+          cat > pkg/usr/share/applications/result-analyzer.desktop << 'DESKTOP'
+          [Desktop Entry]
+          Version=1.0
+          Type=Application
+          Name=College Result Analyzer
+          Comment=Professional result analysis software
+          Exec=ResultAnalyzer %F
+          Icon=result-analyzer
+          Terminal=false
+          Categories=Education;Science;
+          StartupNotify=true
+          DESKTOP
+
+          # Create postinst script to update icon cache
+          cat > pkg/DEBIAN/postinst << 'POSTINST'
+          #!/bin/bash
+          set -e
+          if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database /usr/share/applications
+          fi
+          if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+            gtk-update-icon-cache -f -t /usr/share/icons/hicolor
+          fi
+          exit 0
+          POSTINST
+          chmod +x pkg/DEBIAN/postinst
+
+          # Create postrm script to clean up icon cache
+          cat > pkg/DEBIAN/postrm << 'POSTRM'
+          #!/bin/bash
+          set -e
+          if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+            gtk-update-icon-cache -f -t /usr/share/icons/hicolor
+          fi
+          exit 0
+          POSTRM
+          chmod +x pkg/DEBIAN/postrm
 
           echo "Package: result-analyzer" > pkg/DEBIAN/control
           echo "Version: 1.0.0" >> pkg/DEBIAN/control
           echo "Architecture: amd64" >> pkg/DEBIAN/control
           echo "Maintainer: Developer <dev@email.com>" >> pkg/DEBIAN/control
-          echo "Description: College Result Analyzer Professional result analysis software" >> pkg/DEBIAN/control
+          echo "Depends: libx11-6, libxkbcommon-x11-0, python3-minimal, libglib2.0-0, libfreetype6, libfontconfig1" >> pkg/DEBIAN/control
+          echo "Description: College Result Analyzer - Professional result analysis software" >> pkg/DEBIAN/control
 
           dpkg-deb --build pkg result-analyzer_1.0.0.deb
 

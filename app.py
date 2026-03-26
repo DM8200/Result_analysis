@@ -10,6 +10,19 @@ import sys
 import threading
 from typing import Dict, List
 
+# ── Linux compatibility fixes ──
+if sys.platform.startswith("linux"):
+    try:
+        # Set proper Tcl/Tk library paths on Linux
+        tcl_dir = os.path.join(sys.base_prefix, "lib", "tcl8.6")
+        tk_dir = os.path.join(sys.base_prefix, "lib", "tk8.6")
+        if os.path.exists(tcl_dir):
+            os.environ["TCL_LIBRARY"] = tcl_dir
+        if os.path.exists(tk_dir):
+            os.environ["TK_LIBRARY"] = tk_dir
+    except Exception:
+        pass
+
 import customtkinter as ctk
 import pandas as pd
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -43,27 +56,41 @@ HIGHLIGHT = "#38BDF8"
 
 
 def force_maximize_window(root):
+    """Maximize window - Windows/Linux/Mac compatible."""
     try:
         root.update_idletasks()
-        root.state("zoomed")
-        return
     except Exception:
-        pass
+        return
 
+    # Try platform-specific maximization
     if sys.platform.startswith("win"):
         try:
-            import ctypes
-            user32 = ctypes.windll.user32
-            SW_MAXIMIZE = 3
-            root.update_idletasks()
-            hwnd = user32.GetParent(root.winfo_id())
-            user32.ShowWindow(hwnd, SW_MAXIMIZE)
+            root.state("zoomed")
+            return
+        except Exception:
+            pass
+    elif sys.platform.startswith("linux"):
+        try:
+            # Linux: use attributes instead of state() for better compatibility
+            root.attributes("-zoomed", True)
+            return
+        except Exception:
+            pass
+    elif sys.platform.startswith("darwin"):
+        try:
+            root.state("zoomed")
             return
         except Exception:
             pass
 
-    root.update_idletasks()
-    root.geometry(f"{root.winfo_screenwidth()}x{root.winfo_screenheight()}+0+0")
+    # Fallback: set geometry to screen size
+    try:
+        sw = root.winfo_screenwidth()
+        sh = root.winfo_screenheight()
+        if sw > 100 and sh > 100:
+            root.geometry(f"{sw}x{sh}+0+0")
+    except Exception:
+        pass
 
 
 class StatCard(ctk.CTkFrame):
