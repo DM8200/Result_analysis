@@ -31,6 +31,7 @@ _REACTIVATE_MESSAGES = {
     "license revoked",
     "this license has been revoked",
     "invalid license key",
+    "machine id mismatch",
     "license expired",
     "license has expired",
 }
@@ -243,54 +244,17 @@ class _ActivationDialog(tk.Toplevel):
 def _show_activation_dialog(message: str = "") -> None:
     """
     Shows activation dialog.
-    Linux fix: proper cleanup to prevent segmentation faults.
+    Linux fix: use wait_window and strong cleanup to avoid segfault in Tk.
     """
     root = tk.Tk()
     root.withdraw()
     root.resizable(False, False)
-    
-    # Ensure window is properly initialized
-    try:
-        root.update_idletasks()
-    except Exception:
-        pass
 
     dlg = _ActivationDialog(root, message=message)
-    
-    # Use a flag to track if dialog is still running
-    dialog_closed = [False]
 
-    def _check_dialog():
-        try:
-            if dlg.winfo_exists():
-                root.after(100, _check_dialog)
-            else:
-                dialog_closed[0] = True
-                root.quit()
-        except Exception:
-            dialog_closed[0] = True
-            try:
-                root.quit()
-            except Exception:
-                pass
-
-    # Set a timeout to prevent infinite loops
-    def _timeout():
-        if not dialog_closed[0]:
-            try:
-                dlg.destroy()
-            except Exception:
-                pass
-            try:
-                root.quit()
-            except Exception:
-                pass
-
-    root.after(100, _check_dialog)
-    root.after(60000, _timeout)  # 60 second timeout
-    
+    # Wait for dialog to close and then handle result.
     try:
-        root.mainloop()
+        dlg.wait_window()
     except Exception:
         pass
 
@@ -300,7 +264,7 @@ def _show_activation_dialog(message: str = "") -> None:
     except Exception:
         pass
 
-    # Properly destroy on all platforms, especially Linux
+    # Cleanup root/dialog and force collection on Linux.
     try:
         if dlg.winfo_exists():
             dlg.destroy()
@@ -313,13 +277,13 @@ def _show_activation_dialog(message: str = "") -> None:
     except Exception:
         pass
 
-    # Force garbage collection on Linux to prevent segfaults
+    try:
+        import gc
+        gc.collect()
+    except Exception:
+        pass
+
     if not activated:
-        try:
-            import gc
-            gc.collect()
-        except Exception:
-            pass
         sys.exit(0)
 
 
