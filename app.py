@@ -903,38 +903,106 @@ class ResultAnalyzerApp(ctk.CTk):
             college = get_college_name()
 
             with pd.ExcelWriter(out, engine="openpyxl") as writer:
-                self._build_students_sheet(self.df, groups).to_excel(writer, index=False, sheet_name="Students", startrow=2)
-                self._build_top10_sheet(self.df, groups).to_excel(writer, index=False, sheet_name="Top10", startrow=2)
-                self._build_subjectwise_sheet(self.df, groups).to_excel(writer, index=False, sheet_name="SubjectWise", startrow=2)
+                self._build_students_sheet(self.df, groups).to_excel(writer, index=False, sheet_name="Students", startrow=3)
+                self._build_top10_sheet(self.df, groups).to_excel(writer, index=False, sheet_name="Top10", startrow=3)
+                self._build_subjectwise_sheet(self.df, groups).to_excel(writer, index=False, sheet_name="SubjectWise", startrow=3)
 
-                # Add college name header to each sheet
+                # Enhanced formatting for each sheet
                 if college:
-                    from openpyxl.styles import Font, Alignment, PatternFill
+                    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+                    from openpyxl.utils import get_column_letter
+                    
+                    # Define professional colors
+                    HEADER_BG = "1E3A5F"  # Dark blue
+                    HEADER_TEXT = "FFFFFF"  # White
+                    SUBHEADER_BG = "4472C4"  # Medium blue
+                    TITLE_BG = "D9E8F5"  # Light blue
+                    TITLE_TEXT = "1E3A5F"
+                    ROW_ALT_BG = "E7F0F7"  # Very light blue for alternating rows
+                    PASS_BG = "C6EFCE"  # Light green
+                    FAIL_BG = "FFC7CE"  # Light red
+                    
+                    thin_border = Border(
+                        left=Side(style='thin', color='B4C7E7'),
+                        right=Side(style='thin', color='B4C7E7'),
+                        top=Side(style='thin', color='B4C7E7'),
+                        bottom=Side(style='thin', color='B4C7E7')
+                    )
+                    
                     for sheet_name in ["Students", "Top10", "SubjectWise"]:
                         ws = writer.sheets[sheet_name]
-
-                        # Row 1 — College name (big, bold, blue background)
-                        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max(ws.max_column, 6))
+                        
+                        # Row 1 — College name (big, bold, dark blue background)
+                        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max(ws.max_column, 8))
                         cell = ws.cell(row=1, column=1)
                         cell.value = college.upper()
-                        cell.font = Font(name="Calibri", size=16, bold=True, color="FFFFFF")
+                        cell.font = Font(name="Calibri", size=18, bold=True, color=HEADER_TEXT)
                         cell.alignment = Alignment(horizontal="center", vertical="center")
-                        cell.fill = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
-                        ws.row_dimensions[1].height = 28
-
+                        cell.fill = PatternFill(start_color=HEADER_BG, end_color=HEADER_BG, fill_type="solid")
+                        ws.row_dimensions[1].height = 32
+                        
                         # Row 2 — Sheet title (e.g. "Students Report")
                         title_map = {
-                            "Students":    "Students Result Report",
-                            "Top10":       "Top 10 Students Report",
-                            "SubjectWise": "Subject Wise Analysis Report",
+                            "Students":    "STUDENTS RESULT REPORT",
+                            "Top10":       "TOP 10 STUDENTS REPORT",
+                            "SubjectWise": "SUBJECT WISE ANALYSIS REPORT",
                         }
-                        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max(ws.max_column, 6))
+                        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max(ws.max_column, 8))
                         cell2 = ws.cell(row=2, column=1)
                         cell2.value = title_map.get(sheet_name, sheet_name)
-                        cell2.font = Font(name="Calibri", size=12, bold=True, color="1E3A5F")
+                        cell2.font = Font(name="Calibri", size=14, bold=True, color=HEADER_TEXT)
                         cell2.alignment = Alignment(horizontal="center", vertical="center")
-                        cell2.fill = PatternFill(start_color="D6E4F0", end_color="D6E4F0", fill_type="solid")
-                        ws.row_dimensions[2].height = 20
+                        cell2.fill = PatternFill(start_color=SUBHEADER_BG, end_color=SUBHEADER_BG, fill_type="solid")
+                        ws.row_dimensions[2].height = 26
+                        
+                        # Format header row (Row 3)
+                        header_row = 3
+                        for col_idx in range(1, ws.max_column + 1):
+                            cell = ws.cell(row=header_row, column=col_idx)
+                            cell.font = Font(name="Calibri", size=11, bold=True, color=HEADER_TEXT)
+                            cell.fill = PatternFill(start_color=TITLE_BG, end_color=TITLE_BG, fill_type="solid")
+                            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                            cell.border = thin_border
+                        ws.row_dimensions[3].height = 24
+                        
+                        # Format data rows with alternating colors
+                        for row_idx in range(4, ws.max_row + 1):
+                            # Alternate row colors
+                            row_fill = PatternFill(start_color=ROW_ALT_BG, end_color=ROW_ALT_BG, fill_type="solid") if (row_idx - 4) % 2 == 0 else PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+                            
+                            for col_idx in range(1, ws.max_column + 1):
+                                cell = ws.cell(row=row_idx, column=col_idx)
+                                cell.border = thin_border
+                                cell.fill = row_fill
+                                cell.font = Font(name="Calibri", size=10)
+                                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                                
+                                # Apply conditional formatting for Pass/Fail status
+                                cell_value = str(cell.value).upper() if cell.value else ""
+                                if cell_value == "PASS":
+                                    cell.fill = PatternFill(start_color=PASS_BG, end_color=PASS_BG, fill_type="solid")
+                                    cell.font = Font(name="Calibri", size=10, bold=True, color="006100")
+                                elif cell_value == "FAIL":
+                                    cell.fill = PatternFill(start_color=FAIL_BG, end_color=FAIL_BG, fill_type="solid")
+                                    cell.font = Font(name="Calibri", size=10, bold=True, color="9C0006")
+                            
+                            ws.row_dimensions[row_idx].height = 20
+                        
+                        # Auto-adjust column widths
+                        for col_idx, col in enumerate(ws.columns, 1):
+                            max_length = 0
+                            col_letter = get_column_letter(col_idx)
+                            for cell in col:
+                                try:
+                                    if len(str(cell.value or "")) > max_length:
+                                        max_length = len(str(cell.value or ""))
+                                except:
+                                    pass
+                            adjusted_width = min(max_length + 2, 40)
+                            ws.column_dimensions[col_letter].width = adjusted_width
+                        
+                        # Freeze header rows
+                        ws.freeze_panes = 'A4'
 
             try:
                 os.startfile(out)

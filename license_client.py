@@ -10,6 +10,7 @@ HOW IT WORKS:
   • If expired        → clears saved key → asks to enter new key
   • If server down    → shows warning but still allows app to open
   • College name      → saved locally and used in Excel export header
+  • Linux fix         → root window properly destroyed after activation
 """
 
 from __future__ import annotations
@@ -87,25 +88,18 @@ def _should_reactivate(message: str) -> bool:
 # ─────────────────────── Update Checker ────────────────────────────────────
 
 def _check_for_updates() -> None:
-    """
-    Silently checks server for latest version.
-    If newer version exists → shows a popup with download button.
-    If same version or server unreachable → does nothing.
-    """
     try:
         r = requests.get(f"{SERVER_URL.rstrip('/')}/version", timeout=5)
         data = r.json()
-        latest  = data.get("latest", CURRENT_VERSION)
+        latest   = data.get("latest", CURRENT_VERSION)
         download = data.get("download", "")
         message  = data.get("message", "A new version is available!")
 
         if latest == CURRENT_VERSION:
-            return  # Already up to date — do nothing
+            return
 
-        # ── Show update popup ──
         _tmp = tk.Tk()
         _tmp.withdraw()
-
         response = messagebox.askyesno(
             APP_NAME + " – Update Available 🆕",
             f"New Version Available!\n\n"
@@ -117,12 +111,11 @@ def _check_for_updates() -> None:
             parent=_tmp,
         )
         _tmp.destroy()
-
         if response and download:
-            webbrowser.open(download)   # Opens Google Drive / website in browser
+            webbrowser.open(download)
 
     except Exception:
-        pass   # Silent fail — never block the app for update check
+        pass
 
 
 # ──────────────────────── GUI Activation Dialog ────────────────────────────
@@ -132,15 +125,21 @@ class _ActivationDialog(tk.Toplevel):
         super().__init__(parent)
         self.result: str | None = None
         self.college: str = ""
+        self.activated: bool = False   # ← Linux fix flag
 
         self.title(f"{APP_NAME} – Activation")
         self.resizable(False, False)
         self.configure(bg="#0F172A")
         self.grab_set()
 
+        # ── Center on screen ──
         w, h = 480, 320 if message else 280
-        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
         self.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
+
+        # ── Handle window close button (X) ──
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         tk.Label(
             self, text="⚡ " + APP_NAME,
@@ -209,6 +208,11 @@ class _ActivationDialog(tk.Toplevel):
             relief="flat", bd=0, padx=18, pady=8, cursor="hand2",
         ).pack(pady=(10, 0))
 
+    def _on_close(self):
+        """Handle X button click — exit app."""
+        self.activated = False
+        self.destroy()
+
     def _on_activate(self):
         key = self._key_var.get().strip().upper()
         if not key:
@@ -219,9 +223,10 @@ class _ActivationDialog(tk.Toplevel):
 
         resp = _post("activate", {"key": key, "machine_id": _machine_id()})
         if resp.get("status") == "ok":
-            self.college = resp.get("college", "")
+            self.college   = resp.get("college", "")
+            self.result    = key
+            self.activated = True
             _save_license(key, self.college)
-            self.result = key
             self.destroy()
         else:
             self._status_var.set(f"✖  {resp.get('message', 'Activation failed.')}")
@@ -230,15 +235,36 @@ class _ActivationDialog(tk.Toplevel):
 # ─────────────────────── Activation Flow ───────────────────────────────────
 
 def _show_activation_dialog(message: str = "") -> None:
+    """
+    Shows activation dialog.
+    Linux fix: uses root.mainloop() instead of root.wait_window()
+    to ensure proper event loop handling on all platforms.
+    """
     root = tk.Tk()
     root.withdraw()
+
     dlg = _ActivationDialog(root, message=message)
-    root.wait_window(dlg)
-    if dlg.result:
+
+    # ── Linux fix: use after() to check dialog state ──
+    def _check_dialog():
+        if dlg.winfo_exists():
+            root.after(100, _check_dialog)
+        else:
+            root.quit()
+
+    root.after(100, _check_dialog)
+    root.mainloop()
+
+    activated = getattr(dlg, 'activated', False)
+
+    # ── Properly destroy root on Linux ──
+    try:
         root.destroy()
-        return
-    root.destroy()
-    sys.exit(0)
+    except Exception:
+        pass
+
+    if not activated:
+        sys.exit(0)
 
 
 # ─────────────────────── Public entry-point ────────────────────────────────
@@ -248,29 +274,32 @@ def check_license() -> None:
     Call this ONCE at the very start of app.py (before building the GUI).
     Also checks for software updates on every launch.
     """
-    saved = _load_license()
+    saved     = _load_license()
     saved_key = saved.get("key")
 
     if not saved_key:
+        # ── No key saved — show activation dialog ──
         _show_activation_dialog()
         return
 
+    # ── Key exists — validate with server ──
     resp = _post("validate", {"key": saved_key, "machine_id": _machine_id()})
 
     if resp.get("status") == "ok":
         # Refresh college name
         college = resp.get("college", saved.get("college", ""))
         _save_license(saved_key, college)
-
-        # ── Check for software updates ──
+        # Check for updates
         _check_for_updates()
         return
 
-    msg = resp.get("message", "Unknown error")
+    msg      = resp.get("message", "Unknown error")
     err_type = resp.get("type", "")
 
     if err_type == "network":
-        _tmp = tk.Tk(); _tmp.withdraw()
+        # ── Server unreachable — allow app to open ──
+        _tmp = tk.Tk()
+        _tmp.withdraw()
         messagebox.showwarning(
             APP_NAME + " – No Connection",
             f"Could not reach license server.\n\n{msg}\n\n"
@@ -281,11 +310,14 @@ def check_license() -> None:
         return
 
     if _should_reactivate(msg):
+        # ── Key revoked/expired — clear and ask for new key ──
         _clear_license()
         _show_activation_dialog(message=msg)
         return
 
-    _tmp = tk.Tk(); _tmp.withdraw()
+    # ── Other error ──
+    _tmp = tk.Tk()
+    _tmp.withdraw()
     messagebox.showerror(
         APP_NAME + " – License Error",
         f"License check failed:\n\n{msg}\n\nPlease contact support.",
