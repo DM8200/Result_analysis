@@ -53,46 +53,66 @@ jobs:
             --collect-all pdfminer \
             app.py
 
-      - name: Create .deb package with icon
+      - name: Resize icons
+        run: |
+          python3 - <<'PYEOF'
+from PIL import Image
+import os
+
+if not os.path.exists("logo.png"):
+    print("logo.png not found, skipping icon resize")
+else:
+    img = Image.open("logo.png")
+    sizes = [256, 128, 64, 48]
+    for size in sizes:
+        folder = f"icons/{size}x{size}"
+        os.makedirs(folder, exist_ok=True)
+        img.resize((size, size), Image.LANCZOS).save(f"{folder}/result-analyzer.png")
+    print("Icons created!")
+PYEOF
+
+      - name: Create .deb package
         run: |
           mkdir -p pkg/DEBIAN
           mkdir -p pkg/usr/local/bin
           mkdir -p pkg/usr/share/applications
+          mkdir -p pkg/usr/share/pixmaps
           mkdir -p pkg/usr/share/icons/hicolor/256x256/apps
           mkdir -p pkg/usr/share/icons/hicolor/128x128/apps
           mkdir -p pkg/usr/share/icons/hicolor/64x64/apps
           mkdir -p pkg/usr/share/icons/hicolor/48x48/apps
-          mkdir -p pkg/usr/share/pixmaps
 
           cp dist/ResultAnalyzer pkg/usr/local/bin/ResultAnalyzer
           chmod +x pkg/usr/local/bin/ResultAnalyzer
 
-          # Copy icon if exists in repo
           if [ -f "logo.png" ]; then
             cp logo.png pkg/usr/share/pixmaps/result-analyzer.png
-            cp logo.png pkg/usr/share/icons/hicolor/256x256/apps/result-analyzer.png
-            # Resize for other sizes using Python
-            python3 -c "
-from PIL import Image
-img = Image.open('logo.png')
-for size, path in [
-  (128, 'pkg/usr/share/icons/hicolor/128x128/apps/result-analyzer.png'),
-  (64,  'pkg/usr/share/icons/hicolor/64x64/apps/result-analyzer.png'),
-  (48,  'pkg/usr/share/icons/hicolor/48x48/apps/result-analyzer.png'),
-]:
-    img.resize((size, size), Image.LANCZOS).save(path)
-print('Icons created!')
-"
+            cp icons/256x256/result-analyzer.png pkg/usr/share/icons/hicolor/256x256/apps/result-analyzer.png
+            cp icons/128x128/result-analyzer.png pkg/usr/share/icons/hicolor/128x128/apps/result-analyzer.png
+            cp icons/64x64/result-analyzer.png pkg/usr/share/icons/hicolor/64x64/apps/result-analyzer.png
+            cp icons/48x48/result-analyzer.png pkg/usr/share/icons/hicolor/48x48/apps/result-analyzer.png
           fi
 
-          # Create control file
-          printf "Package: result-analyzer\nVersion: 1.0.0\nArchitecture: amd64\nMaintainer: Developer <dev@email.com>\nDescription: College Result Analyzer\n Professional result analysis software for colleges.\n" > pkg/DEBIAN/control
+          echo "Package: result-analyzer" > pkg/DEBIAN/control
+          echo "Version: 1.0.0" >> pkg/DEBIAN/control
+          echo "Architecture: amd64" >> pkg/DEBIAN/control
+          echo "Maintainer: Developer <dev@email.com>" >> pkg/DEBIAN/control
+          echo "Description: College Result Analyzer" >> pkg/DEBIAN/control
+          echo " Professional result analysis software." >> pkg/DEBIAN/control
 
-          # Create desktop entry with icon
-          printf "[Desktop Entry]\nVersion=1.0\nName=Result Analyzer\nComment=College Result Analyzer\nExec=/usr/local/bin/ResultAnalyzer\nIcon=result-analyzer\nTerminal=false\nType=Application\nCategories=Education;Office;\nStartupWMClass=ResultAnalyzer\n" > pkg/usr/share/applications/result-analyzer.desktop
+          echo "[Desktop Entry]" > pkg/usr/share/applications/result-analyzer.desktop
+          echo "Version=1.0" >> pkg/usr/share/applications/result-analyzer.desktop
+          echo "Name=Result Analyzer" >> pkg/usr/share/applications/result-analyzer.desktop
+          echo "Comment=College Result Analyzer" >> pkg/usr/share/applications/result-analyzer.desktop
+          echo "Exec=/usr/local/bin/ResultAnalyzer" >> pkg/usr/share/applications/result-analyzer.desktop
+          echo "Icon=result-analyzer" >> pkg/usr/share/applications/result-analyzer.desktop
+          echo "Terminal=false" >> pkg/usr/share/applications/result-analyzer.desktop
+          echo "Type=Application" >> pkg/usr/share/applications/result-analyzer.desktop
+          echo "Categories=Education;Office;" >> pkg/usr/share/applications/result-analyzer.desktop
 
-          # Post-install script to update icon cache
-          printf "#!/bin/bash\nupdate-desktop-database /usr/share/applications 2>/dev/null || true\ngtk-update-icon-cache /usr/share/icons/hicolor 2>/dev/null || true\n" > pkg/DEBIAN/postinst
+          echo "#!/bin/bash" > pkg/DEBIAN/postinst
+          echo "update-desktop-database /usr/share/applications 2>/dev/null || true" >> pkg/DEBIAN/postinst
+          echo "gtk-update-icon-cache /usr/share/icons/hicolor 2>/dev/null || true" >> pkg/DEBIAN/postinst
           chmod +x pkg/DEBIAN/postinst
 
           dpkg-deb --build pkg result-analyzer_1.0.0.deb
