@@ -16,7 +16,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Install system dependencies
         run: |
@@ -30,7 +30,7 @@ jobs:
 
       - name: Build Linux binary
         run: |
-          pyinstaller --onefile --name "ResultAnalyzer" \
+          pyinstaller --onefile --name ResultAnalyzer \
             --hidden-import=pdfplumber \
             --hidden-import=pdfminer \
             --hidden-import=pdfminer.high_level \
@@ -40,9 +40,7 @@ jobs:
             --hidden-import=pdfminer.pdfdevice \
             --hidden-import=customtkinter \
             --hidden-import=openpyxl \
-            --hidden-import=openpyxl.styles \
             --hidden-import=pandas \
-            --hidden-import=pandas.io.formats.excel \
             --hidden-import=matplotlib \
             --hidden-import=matplotlib.backends.backend_tkagg \
             --hidden-import=requests \
@@ -54,24 +52,25 @@ jobs:
             app.py
 
       - name: Resize icons
+        shell: bash
         run: |
-          python3 - <<'PYEOF'
-from PIL import Image
-import os
+          python3 << 'EOF'
+          from PIL import Image
+          import os
 
-if not os.path.exists("logo.png"):
-    print("logo.png not found, skipping icon resize")
-else:
-    img = Image.open("logo.png")
-    sizes = [256, 128, 64, 48]
-    for size in sizes:
-        folder = f"icons/{size}x{size}"
-        os.makedirs(folder, exist_ok=True)
-        img.resize((size, size), Image.LANCZOS).save(f"{folder}/result-analyzer.png")
-    print("Icons created!")
-PYEOF
+          if not os.path.exists("logo.png"):
+              print("logo.png not found, skipping icon resize")
+          else:
+              img = Image.open("logo.png")
+              sizes = [256,128,64,48]
+              for size in sizes:
+                  folder = f"icons/{size}x{size}"
+                  os.makedirs(folder, exist_ok=True)
+                  img.resize((size,size), Image.LANCZOS).save(f"{folder}/result-analyzer.png")
+              print("Icons created!")
+          EOF
 
-      - name: Create .deb package
+      - name: Create deb package
         run: |
           mkdir -p pkg/DEBIAN
           mkdir -p pkg/usr/local/bin
@@ -85,7 +84,7 @@ PYEOF
           cp dist/ResultAnalyzer pkg/usr/local/bin/ResultAnalyzer
           chmod +x pkg/usr/local/bin/ResultAnalyzer
 
-          if [ -f "logo.png" ]; then
+          if [ -f logo.png ]; then
             cp logo.png pkg/usr/share/pixmaps/result-analyzer.png
             cp icons/256x256/result-analyzer.png pkg/usr/share/icons/hicolor/256x256/apps/result-analyzer.png
             cp icons/128x128/result-analyzer.png pkg/usr/share/icons/hicolor/128x128/apps/result-analyzer.png
@@ -97,23 +96,7 @@ PYEOF
           echo "Version: 1.0.0" >> pkg/DEBIAN/control
           echo "Architecture: amd64" >> pkg/DEBIAN/control
           echo "Maintainer: Developer <dev@email.com>" >> pkg/DEBIAN/control
-          echo "Description: College Result Analyzer" >> pkg/DEBIAN/control
-          echo " Professional result analysis software." >> pkg/DEBIAN/control
-
-          echo "[Desktop Entry]" > pkg/usr/share/applications/result-analyzer.desktop
-          echo "Version=1.0" >> pkg/usr/share/applications/result-analyzer.desktop
-          echo "Name=Result Analyzer" >> pkg/usr/share/applications/result-analyzer.desktop
-          echo "Comment=College Result Analyzer" >> pkg/usr/share/applications/result-analyzer.desktop
-          echo "Exec=/usr/local/bin/ResultAnalyzer" >> pkg/usr/share/applications/result-analyzer.desktop
-          echo "Icon=result-analyzer" >> pkg/usr/share/applications/result-analyzer.desktop
-          echo "Terminal=false" >> pkg/usr/share/applications/result-analyzer.desktop
-          echo "Type=Application" >> pkg/usr/share/applications/result-analyzer.desktop
-          echo "Categories=Education;Office;" >> pkg/usr/share/applications/result-analyzer.desktop
-
-          echo "#!/bin/bash" > pkg/DEBIAN/postinst
-          echo "update-desktop-database /usr/share/applications 2>/dev/null || true" >> pkg/DEBIAN/postinst
-          echo "gtk-update-icon-cache /usr/share/icons/hicolor 2>/dev/null || true" >> pkg/DEBIAN/postinst
-          chmod +x pkg/DEBIAN/postinst
+          echo "Description: College Result Analyzer Professional result analysis software" >> pkg/DEBIAN/control
 
           dpkg-deb --build pkg result-analyzer_1.0.0.deb
 
@@ -124,4 +107,3 @@ PYEOF
           path: |
             dist/ResultAnalyzer
             result-analyzer_1.0.0.deb
-          retention-days: 30
