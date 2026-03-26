@@ -14,6 +14,7 @@ HOW IT WORKS:
 """
 
 from __future__ import annotations
+import gc
 import hashlib, json, os, platform, sys, tkinter as tk, webbrowser
 from tkinter import messagebox
 import requests
@@ -100,19 +101,24 @@ def _check_for_updates() -> None:
 
         _tmp = tk.Tk()
         _tmp.withdraw()
-        response = messagebox.askyesno(
-            APP_NAME + " – Update Available 🆕",
-            f"New Version Available!\n\n"
-            f"  Current version : {CURRENT_VERSION}\n"
-            f"  New version     : {latest}\n\n"
-            f"{message}\n\n"
-            f"Click YES to open the download page now.\n"
-            f"Click NO to continue with current version.",
-            parent=_tmp,
-        )
-        _tmp.destroy()
-        if response and download:
-            webbrowser.open(download)
+        try:
+            response = messagebox.askyesno(
+                APP_NAME + " – Update Available 🆕",
+                f"New Version Available!\n\n"
+                f"  Current version : {CURRENT_VERSION}\n"
+                f"  New version     : {latest}\n\n"
+                f"{message}\n\n"
+                f"Click YES to open the download page now.\n"
+                f"Click NO to continue with current version.",
+                parent=_tmp,
+            )
+            if response and download:
+                webbrowser.open(download)
+        finally:
+            try:
+                _tmp.destroy()
+            except Exception:
+                pass
 
     except Exception:
         pass
@@ -237,33 +243,83 @@ class _ActivationDialog(tk.Toplevel):
 def _show_activation_dialog(message: str = "") -> None:
     """
     Shows activation dialog.
-    Linux fix: uses root.mainloop() instead of root.wait_window()
-    to ensure proper event loop handling on all platforms.
+    Linux fix: proper cleanup to prevent segmentation faults.
     """
     root = tk.Tk()
     root.withdraw()
-
-    dlg = _ActivationDialog(root, message=message)
-
-    # ── Linux fix: use after() to check dialog state ──
-    def _check_dialog():
-        if dlg.winfo_exists():
-            root.after(100, _check_dialog)
-        else:
-            root.quit()
-
-    root.after(100, _check_dialog)
-    root.mainloop()
-
-    activated = getattr(dlg, 'activated', False)
-
-    # ── Properly destroy root on Linux ──
+    root.resizable(False, False)
+    
+    # Ensure window is properly initialized
     try:
-        root.destroy()
+        root.update_idletasks()
     except Exception:
         pass
 
+    dlg = _ActivationDialog(root, message=message)
+    
+    # Use a flag to track if dialog is still running
+    dialog_closed = [False]
+
+    def _check_dialog():
+        try:
+            if dlg.winfo_exists():
+                root.after(100, _check_dialog)
+            else:
+                dialog_closed[0] = True
+                root.quit()
+        except Exception:
+            dialog_closed[0] = True
+            try:
+                root.quit()
+            except Exception:
+                pass
+
+    # Set a timeout to prevent infinite loops
+    def _timeout():
+        if not dialog_closed[0]:
+            try:
+                dlg.destroy()
+            except Exception:
+                pass
+            try:
+                root.quit()
+            except Exception:
+                pass
+
+    root.after(100, _check_dialog)
+    root.after(60000, _timeout)  # 60 second timeout
+    
+    try:
+        root.mainloop()
+    except Exception:
+        pass
+
+    activated = False
+    try:
+        activated = getattr(dlg, 'activated', False)
+    except Exception:
+        pass
+
+    # Properly destroy on all platforms, especially Linux
+    try:
+        if dlg.winfo_exists():
+            dlg.destroy()
+    except Exception:
+        pass
+
+    try:
+        if root.winfo_exists():
+            root.destroy()
+    except Exception:
+        pass
+
+    # Force garbage collection on Linux to prevent segfaults
     if not activated:
+        try:
+            import gc
+            gc.collect()
+        except Exception:
+            pass
         sys.exit(0)
 
 
@@ -274,54 +330,79 @@ def check_license() -> None:
     Call this ONCE at the very start of app.py (before building the GUI).
     Also checks for software updates on every launch.
     """
-    saved     = _load_license()
-    saved_key = saved.get("key")
+    try:
+        saved     = _load_license()
+        saved_key = saved.get("key")
 
-    if not saved_key:
-        # ── No key saved — show activation dialog ──
-        _show_activation_dialog()
-        return
+        if not saved_key:
+            # ── No key saved — show activation dialog ──
+            _show_activation_dialog()
+            return
 
-    # ── Key exists — validate with server ──
-    resp = _post("validate", {"key": saved_key, "machine_id": _machine_id()})
+        # ── Key exists — validate with server ──
+        resp = _post("validate", {"key": saved_key, "machine_id": _machine_id()})
 
-    if resp.get("status") == "ok":
-        # Refresh college name
-        college = resp.get("college", saved.get("college", ""))
-        _save_license(saved_key, college)
-        # Check for updates
-        _check_for_updates()
-        return
+        if resp.get("status") == "ok":
+            # Refresh college name
+            college = resp.get("college", saved.get("college", ""))
+            _save_license(saved_key, college)
+            # Check for updates
+            _check_for_updates()
+            return
 
-    msg      = resp.get("message", "Unknown error")
-    err_type = resp.get("type", "")
+        msg      = resp.get("message", "Unknown error")
+        err_type = resp.get("type", "")
 
-    if err_type == "network":
-        # ── Server unreachable — allow app to open ──
+        if err_type == "network":
+            # ── Server unreachable — allow app to open ──
+            _tmp = tk.Tk()
+            _tmp.withdraw()
+            try:
+                messagebox.showwarning(
+                    APP_NAME + " – No Connection",
+                    f"Could not reach license server.\n\n{msg}\n\n"
+                    "The app will open, but please check your internet connection.",
+                    parent=_tmp,
+                )
+            finally:
+                try:
+                    _tmp.destroy()
+                except Exception:
+                    pass
+            return
+
+        if _should_reactivate(msg):
+            # ── Key revoked/expired — clear and ask for new key ──
+            _clear_license()
+            _show_activation_dialog(message=msg)
+            return
+
+        # ── Other error ──
         _tmp = tk.Tk()
         _tmp.withdraw()
-        messagebox.showwarning(
-            APP_NAME + " – No Connection",
-            f"Could not reach license server.\n\n{msg}\n\n"
-            "The app will open, but please check your internet connection.",
-            parent=_tmp,
-        )
-        _tmp.destroy()
-        return
-
-    if _should_reactivate(msg):
-        # ── Key revoked/expired — clear and ask for new key ──
-        _clear_license()
-        _show_activation_dialog(message=msg)
-        return
-
-    # ── Other error ──
-    _tmp = tk.Tk()
-    _tmp.withdraw()
-    messagebox.showerror(
-        APP_NAME + " – License Error",
-        f"License check failed:\n\n{msg}\n\nPlease contact support.",
-        parent=_tmp,
-    )
-    _tmp.destroy()
-    sys.exit(1)
+        try:
+            messagebox.showerror(
+                APP_NAME + " – License Error",
+                f"License check failed:\n\n{msg}\n\nPlease contact support.",
+                parent=_tmp,
+            )
+        finally:
+            try:
+                _tmp.destroy()
+            except Exception:
+                pass
+        sys.exit(1)
+    except Exception as e:
+        # Catch any unexpected errors to prevent segfaults
+        try:
+            _tmp = tk.Tk()
+            _tmp.withdraw()
+            messagebox.showerror(
+                APP_NAME + " – Initialization Error",
+                f"An unexpected error occurred during license check:\n\n{str(e)}\n\nPlease restart the application.",
+                parent=_tmp,
+            )
+            _tmp.destroy()
+        except Exception:
+            pass
+        sys.exit(1)
