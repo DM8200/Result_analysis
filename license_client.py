@@ -25,6 +25,11 @@ LICENSE_FILE    = os.path.join(os.path.expanduser("~"), ".result_analyzer_licens
 APP_NAME        = "College Result Analyzer"
 CURRENT_VERSION = "1.0.0"   # ← change this every time you build a new EXE
 TIMEOUT         = 10
+
+# Detect if running as PyInstaller bundle
+IS_BUNDLED = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+IS_LINUX = sys.platform.startswith('linux')
+
 # ───────────────────────────────────────────────────────────────────────────
 
 _REACTIVATE_MESSAGES = {
@@ -244,18 +249,31 @@ class _ActivationDialog(tk.Toplevel):
 def _show_activation_dialog(message: str = "") -> None:
     """
     Shows activation dialog.
-    Linux fix: use wait_window and strong cleanup to avoid segfault in Tk.
+    On Linux PyInstaller bundles, uses simpler non-Tk approach to avoid segfault.
     """
+    if IS_BUNDLED and IS_LINUX:
+        # On Linux PyInstaller, skip GUI dialog to avoid Tk segfault
+        print("\n" + "="*60, file=sys.stderr)
+        print("ACTIVATION REQUIRED", file=sys.stderr)
+        print("="*60, file=sys.stderr)
+        if message:
+            print(f"Message: {message}", file=sys.stderr)
+        print("\nPlease run: ResultAnalyzer --activate", file=sys.stderr)
+        print("Then enter your license key when prompted.", file=sys.stderr)
+        print("="*60 + "\n", file=sys.stderr)
+        sys.exit(1)
+    
+    # For Windows/macOS or non-bundled, use GUI dialog
     root = tk.Tk()
     root.withdraw()
     root.resizable(False, False)
 
     dlg = _ActivationDialog(root, message=message)
 
-    # Wait for dialog to close and then handle result.
     try:
         dlg.wait_window()
-    except Exception:
+    except Exception as e:
+        print(f"Dialog error: {e}", file=sys.stderr)
         pass
 
     activated = False
@@ -264,7 +282,6 @@ def _show_activation_dialog(message: str = "") -> None:
     except Exception:
         pass
 
-    # Cleanup root/dialog and force collection on Linux.
     try:
         if dlg.winfo_exists():
             dlg.destroy()
@@ -278,7 +295,6 @@ def _show_activation_dialog(message: str = "") -> None:
         pass
 
     try:
-        import gc
         gc.collect()
     except Exception:
         pass
@@ -294,6 +310,11 @@ def check_license() -> None:
     Call this ONCE at the very start of app.py (before building the GUI).
     Also checks for software updates on every launch.
     """
+    # Handle CLI activation mode on Linux
+    if IS_BUNDLED and IS_LINUX and "--activate" in sys.argv:
+        _handle_cli_activation()
+        return
+    
     try:
         saved     = _load_license()
         saved_key = saved.get("key")
@@ -319,20 +340,22 @@ def check_license() -> None:
 
         if err_type == "network":
             # ── Server unreachable — allow app to open ──
-            _tmp = tk.Tk()
-            _tmp.withdraw()
-            try:
-                messagebox.showwarning(
-                    APP_NAME + " – No Connection",
-                    f"Could not reach license server.\n\n{msg}\n\n"
-                    "The app will open, but please check your internet connection.",
-                    parent=_tmp,
-                )
-            finally:
+            if not (IS_BUNDLED and IS_LINUX):
+                _tmp = tk.Tk()
+                _tmp.withdraw()
                 try:
-                    _tmp.destroy()
-                except Exception:
-                    pass
+                    messagebox.showwarning(
+                        APP_NAME + " – No Connection",
+                        f"Could not reach license server.\n\n{msg}\n\n"
+                        "The app will open, but please check your internet connection.",
+                        parent=_tmp,
+                    )
+                finally:
+                    try:
+                        _tmp.destroy()
+                    except Exception:
+                        pass
+            print(f"WARNING: {msg}", file=sys.stderr)
             return
 
         if _should_reactivate(msg):
@@ -342,31 +365,73 @@ def check_license() -> None:
             return
 
         # ── Other error ──
-        _tmp = tk.Tk()
-        _tmp.withdraw()
-        try:
-            messagebox.showerror(
-                APP_NAME + " – License Error",
-                f"License check failed:\n\n{msg}\n\nPlease contact support.",
-                parent=_tmp,
-            )
-        finally:
+        if not (IS_BUNDLED and IS_LINUX):
+            _tmp = tk.Tk()
+            _tmp.withdraw()
             try:
-                _tmp.destroy()
-            except Exception:
-                pass
+                messagebox.showerror(
+                    APP_NAME + " – License Error",
+                    f"License check failed:\n\n{msg}\n\nPlease contact support.",
+                    parent=_tmp,
+                )
+            finally:
+                try:
+                    _tmp.destroy()
+                except Exception:
+                    pass
+        print(f"ERROR: {msg}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
         # Catch any unexpected errors to prevent segfaults
-        try:
-            _tmp = tk.Tk()
-            _tmp.withdraw()
-            messagebox.showerror(
-                APP_NAME + " – Initialization Error",
-                f"An unexpected error occurred during license check:\n\n{str(e)}\n\nPlease restart the application.",
-                parent=_tmp,
-            )
-            _tmp.destroy()
-        except Exception:
-            pass
+        if not (IS_BUNDLED and IS_LINUX):
+            try:
+                _tmp = tk.Tk()
+                _tmp.withdraw()
+                messagebox.showerror(
+                    APP_NAME + " – Initialization Error",
+                    f"An unexpected error occurred during license check:\n\n{str(e)}\n\nPlease restart the application.",
+                    parent=_tmp,
+                )
+                _tmp.destroy()
+            except Exception:
+                pass
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _handle_cli_activation() -> None:
+    """
+    CLI-based activation for Linux PyInstaller bundles.
+    Allows headless license key entry without GUI dialogs.
+    """
+    print("\n" + "="*60, file=sys.stderr)
+    print(f"{APP_NAME} – License Activation", file=sys.stderr)
+    print("="*60, file=sys.stderr)
+    
+    try:
+        key = input("Enter your license key: ").strip().upper()
+        if not key:
+            print("ERROR: No key provided.", file=sys.stderr)
+            sys.exit(1)
+        
+        print("Activating, please wait...", file=sys.stderr)
+        resp = _post("activate", {"key": key, "machine_id": _machine_id()})
+        
+        if resp.get("status") == "ok":
+            college = resp.get("college", "")
+            _save_license(key, college)
+            print(f"✓ Activation successful!", file=sys.stderr)
+            print(f"  College: {college}", file=sys.stderr)
+            print("="*60 + "\n", file=sys.stderr)
+            return
+        else:
+            msg = resp.get("message", "Activation failed")
+            print(f"✗ {msg}", file=sys.stderr)
+            print("="*60 + "\n", file=sys.stderr)
+            sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nActivation cancelled.", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
