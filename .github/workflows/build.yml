@@ -42,7 +42,7 @@ jobs:
 
       - name: Build Linux binary (onedir)
         run: |
-          pyinstaller --onedir --windowed --name ResultAnalyzer \
+          pyinstaller --onedir --windowed --name ResultAnalyzer app.py \
           --collect-all customtkinter \
           --collect-all tkinter \
           --collect-all matplotlib \
