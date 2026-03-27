@@ -49,7 +49,6 @@ jobs:
           --collect-all pdfplumber \
           --collect-all pdfminer \
           --hidden-import=pdfminer.high_level \
-          --hidden-import=pdfminer.layout \
           --hidden-import=openpyxl \
           --hidden-import=pandas \
           --hidden-import=requests \
@@ -81,7 +80,7 @@ jobs:
 
       - name: Create wrapper script
         run: |
-          printf '#!/bin/bash\nexport DISPLAY=${DISPLAY:-:0}\nexport MPLBACKEND=TkAgg\nexport TCL_LIBRARY=/usr/share/tcltk/tcl8.6\nexport TK_LIBRARY=/usr/share/tcltk/tk8.6\ncd /usr/local/bin/ResultAnalyzer\n./ResultAnalyzer\n' > wrapper.sh
+          printf '#!/bin/bash\nexport DISPLAY=${DISPLAY:-:0}\nexport MPLBACKEND=TkAgg\nexport TCL_LIBRARY=/usr/share/tcltk/tcl8.6\nexport TK_LIBRARY=/usr/share/tcltk/tk8.6\ncd /usr/local/bin/ResultAnalyzer\n./ResultAnalyzer "$@"\n' > wrapper.sh
           chmod +x wrapper.sh
 
       - name: Create desktop file
@@ -105,8 +104,8 @@ jobs:
           mkdir -p pkg/usr/share/pixmaps
 
           cp -r dist/ResultAnalyzer pkg/usr/local/bin/
-          cp wrapper.sh pkg/usr/local/bin/ResultAnalyzerLauncher
-          chmod +x pkg/usr/local/bin/ResultAnalyzerLauncher
+          cp wrapper.sh pkg/usr/local/bin/ResultAnalyzer
+          chmod +x pkg/usr/local/bin/ResultAnalyzer
 
           cp result-analyzer.desktop pkg/usr/share/applications/
           cp control pkg/DEBIAN/control
