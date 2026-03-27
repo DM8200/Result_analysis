@@ -21,18 +21,25 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk tk8.6 tcl8.6 libtk8.6 libtcl8.6 \
-          libx11-6 libxft2 libxext6 libglib2.0-0 libgl1-mesa-glx libfreetype6 \
-          libfontconfig1 libdbus-1-3 libxkbcommon0 libxkbcommon-x11-0 \
+          sudo apt-get install -y \
+          python3-tk tk8.6 tcl8.6 libtk8.6 libtcl8.6 \
+          libx11-6 libxft2 libxext6 libglib2.0-0 \
+          libgl1-mesa-glx libfreetype6 libfontconfig1 \
+          libdbus-1-3 libxkbcommon0 libxkbcommon-x11-0 \
           libxcb1 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
           libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 \
-          libxcb-xfixes0 libxcb-shape0 fonts-dejavu binutils
+          libxcb-xfixes0 libxcb-shape0 fonts-dejavu binutils dpkg
 
       - name: Install Python dependencies
         run: |
-          pip install --upgrade pip setuptools wheel
-          pip install pyinstaller==5.13.2
-          pip install customtkinter pdfplumber pandas matplotlib requests openpyxl pillow
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade setuptools wheel
+          python -m pip install pyinstaller==5.13.2
+          python -m pip install customtkinter pdfplumber pandas matplotlib requests openpyxl pillow
+
+      - name: Verify Python packages
+        run: |
+          pip list
 
       - name: Build Linux binary
         run: |
@@ -46,16 +53,30 @@ jobs:
           --hidden-import=pdfminer.pdfdevice \
           --hidden-import=customtkinter \
           --hidden-import=openpyxl \
+          --hidden-import=openpyxl.styles \
           --hidden-import=pandas \
+          --hidden-import=pandas.io.formats.excel \
           --hidden-import=matplotlib \
+          --hidden-import=matplotlib.backends.backend_tkagg \
+          --hidden-import=matplotlib.backends.backend_agg \
           --hidden-import=requests \
+          --hidden-import=charset_normalizer \
           --hidden-import=PIL \
           --hidden-import=tkinter \
+          --hidden-import=tkinter.ttk \
+          --hidden-import=tkinter.messagebox \
+          --hidden-import=tkinter.filedialog \
+          --hidden-import=_tkinter \
           --collect-all customtkinter \
           --collect-all pdfplumber \
           --collect-all pdfminer \
           --collect-all matplotlib \
           app.py
+
+      - name: Check dist folder
+        run: |
+          ls -la
+          ls -la dist
 
       - name: Resize icons
         run: |
@@ -76,28 +97,39 @@ jobs:
 
       - name: Create wrapper script
         run: |
-          printf '#!/bin/bash\nexport DISPLAY=${DISPLAY:-:0}\nexec /usr/local/bin/result-analyzer-bin "$@"\n' > wrapper.sh
+          printf '#!/bin/bash\nexport DISPLAY=${DISPLAY:-:0}\nexport LC_ALL=C.UTF-8\nexport LANG=C.UTF-8\nexec /usr/local/bin/result-analyzer-bin "$@"\n' > wrapper.sh
           chmod +x wrapper.sh
 
       - name: Create desktop file
         run: |
-          printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=College Result Analyzer\nExec=ResultAnalyzer\nIcon=result-analyzer\nTerminal=false\nCategories=Education;Office;\n' > result-analyzer.desktop
+          printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=College Result Analyzer\nComment=Professional result analysis software\nExec=ResultAnalyzer\nIcon=result-analyzer\nTerminal=false\nCategories=Education;Office;\nStartupNotify=true\n' > result-analyzer.desktop
 
       - name: Create control file
         run: |
-          printf 'Package: result-analyzer\nVersion: 1.0.0\nArchitecture: amd64\nMaintainer: Developer <dev@email.com>\nDepends: libx11-6, libglib2.0-0, python3-tk\nDescription: College Result Analyzer\n Professional result analysis software.\n' > control
+          printf 'Package: result-analyzer\nVersion: 1.0.0\nArchitecture: amd64\nMaintainer: Developer <dev@email.com>\nDepends: libx11-6, libglib2.0-0, libgl1-mesa-glx, python3-tk, libfreetype6, libfontconfig1, libxcb1\nDescription: College Result Analyzer\n Professional result analysis software for colleges.\n' > control
+
+      - name: Create postinst script
+        run: |
+          printf '#!/bin/bash\nset -e\nupdate-desktop-database /usr/share/applications 2>/dev/null || true\ngtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true\nexit 0\n' > postinst
+          chmod +x postinst
 
       - name: Build deb package
         run: |
           mkdir -p pkg/DEBIAN
           mkdir -p pkg/usr/local/bin
           mkdir -p pkg/usr/share/applications
+          mkdir -p pkg/usr/share/pixmaps
 
           cp dist/ResultAnalyzer pkg/usr/local/bin/result-analyzer-bin
           chmod +x pkg/usr/local/bin/result-analyzer-bin
           cp wrapper.sh pkg/usr/local/bin/ResultAnalyzer
           cp result-analyzer.desktop pkg/usr/share/applications/
           cp control pkg/DEBIAN/control
+          cp postinst pkg/DEBIAN/postinst
+
+          if [ -f "logo.png" ]; then
+            cp logo.png pkg/usr/share/pixmaps/result-analyzer.png
+          fi
 
           dpkg-deb --build pkg result-analyzer_1.0.0.deb
           ls -lh result-analyzer_1.0.0.deb
@@ -109,3 +141,4 @@ jobs:
           path: |
             dist/ResultAnalyzer
             result-analyzer_1.0.0.deb
+          retention-days: 30
