@@ -40,12 +40,9 @@ jobs:
           python -m pip install pyinstaller==6.6.0
           python -m pip install customtkinter pdfplumber pdfminer.six pandas matplotlib requests openpyxl pillow
 
-      - name: Verify Python packages
-        run: pip list
-
-      - name: Build Linux binary
+      - name: Build Linux binary (onedir)
         run: |
-          pyinstaller --onefile --windowed --name ResultAnalyzer \
+          pyinstaller --onedir --windowed --name ResultAnalyzer \
           --collect-all customtkinter \
           --collect-all tkinter \
           --collect-all matplotlib \
@@ -53,9 +50,6 @@ jobs:
           --collect-all pdfminer \
           --hidden-import=pdfminer.high_level \
           --hidden-import=pdfminer.layout \
-          --hidden-import=pdfminer.converter \
-          --hidden-import=pdfminer.pdfinterp \
-          --hidden-import=pdfminer.pdfdevice \
           --hidden-import=openpyxl \
           --hidden-import=pandas \
           --hidden-import=requests \
@@ -66,6 +60,7 @@ jobs:
         run: |
           ls -la
           ls -la dist
+          ls -la dist/ResultAnalyzer
 
       - name: Resize icons
         run: |
@@ -86,7 +81,7 @@ jobs:
 
       - name: Create wrapper script
         run: |
-          printf '#!/bin/bash\nexport DISPLAY=${DISPLAY:-:0}\nexport GDK_BACKEND=x11\nexport MPLBACKEND=TkAgg\nexport TCL_LIBRARY=/usr/share/tcltk/tcl8.6\nexport TK_LIBRARY=/usr/share/tcltk/tk8.6\nexport LC_ALL=C.UTF-8\nexport LANG=C.UTF-8\ncd /usr/local/bin\n./result-analyzer-bin\n' > wrapper.sh
+          printf '#!/bin/bash\nexport DISPLAY=${DISPLAY:-:0}\nexport MPLBACKEND=TkAgg\nexport TCL_LIBRARY=/usr/share/tcltk/tcl8.6\nexport TK_LIBRARY=/usr/share/tcltk/tk8.6\ncd /usr/local/bin/ResultAnalyzer\n./ResultAnalyzer\n' > wrapper.sh
           chmod +x wrapper.sh
 
       - name: Create desktop file
@@ -109,10 +104,10 @@ jobs:
           mkdir -p pkg/usr/share/applications
           mkdir -p pkg/usr/share/pixmaps
 
-          cp dist/ResultAnalyzer pkg/usr/local/bin/result-analyzer-bin
-          chmod +x pkg/usr/local/bin/result-analyzer-bin
+          cp -r dist/ResultAnalyzer pkg/usr/local/bin/
+          cp wrapper.sh pkg/usr/local/bin/ResultAnalyzerLauncher
+          chmod +x pkg/usr/local/bin/ResultAnalyzerLauncher
 
-          cp wrapper.sh pkg/usr/local/bin/ResultAnalyzer
           cp result-analyzer.desktop pkg/usr/share/applications/
           cp control pkg/DEBIAN/control
           cp postinst pkg/DEBIAN/postinst
