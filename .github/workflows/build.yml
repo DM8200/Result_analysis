@@ -33,9 +33,10 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade setuptools wheel
-          python -m pip install pyinstaller==5.13.2
-          python -m pip install customtkinter pdfplumber pandas matplotlib requests openpyxl pillow
+          python -m pip install setuptools==69.5.1
+          python -m pip install wheel
+          python -m pip install pyinstaller==6.6.0
+          python -m pip install customtkinter pdfplumber pdfminer.six pandas matplotlib requests openpyxl pillow
 
       - name: Verify Python packages
         run: |
