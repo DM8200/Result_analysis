@@ -21,125 +21,53 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            python3-tk \
-            tk8.6 \
-            tcl8.6 \
-            libtk8.6 \
-            libtcl8.6 \
-            libx11-6 \
-            libxft2 \
-            libxext6 \
-            libglib2.0-0 \
-            libgl1-mesa-glx \
-            libgl1-mesa-dri \
-            libegl1-mesa \
-            libfreetype6 \
-            libfontconfig1 \
-            libdbus-1-3 \
-            libxkbcommon0 \
-            libxkbcommon-x11-0 \
-            libxcb1 \
-            libxcb-util1 \
-            libxcb-icccm4 \
-            libxcb-image0 \
-            libxcb-keysyms1 \
-            libxcb-randr0 \
-            libxcb-render-util0 \
-            libxcb-xinerama0 \
-            libxcb-xfixes0 \
-            libxcb-shape0 \
-            fonts-dejavu \
-            binutils \
-            zlib1g-dev
+          sudo apt-get install -y python3-tk tk8.6 tcl8.6 libtk8.6 libtcl8.6 libx11-6 libxft2 libxext6 libglib2.0-0 libgl1-mesa-glx libfreetype6 libfontconfig1 libdbus-1-3 libxkbcommon0 libxkbcommon-x11-0 libxcb1 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 libxcb-shape0 fonts-dejavu binutils
 
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip setuptools wheel
-          pip install pyinstaller==5.13.2
-          pip install customtkinter
-          pip install pdfplumber
-          pip install pandas
-          pip install matplotlib
-          pip install requests
-          pip install openpyxl
-          pip install pillow
+          pip install "pyinstaller==5.13.2"
+          pip install customtkinter pdfplumber pandas matplotlib requests openpyxl pillow
 
-      - name: Create hook file
+      - name: Build Linux binary
         run: |
-          mkdir -p hooks
-          cat > hooks/hook-customtkinter.py << 'HOOKEOF'
-          from PyInstaller.utils.hooks import collect_data_files, collect_submodules
-          datas = collect_data_files('customtkinter')
-          hiddenimports = collect_submodules('customtkinter')
-          HOOKEOF
+          pyinstaller --onefile --name ResultAnalyzer --hidden-import=pdfplumber --hidden-import=pdfminer --hidden-import=pdfminer.high_level --hidden-import=pdfminer.layout --hidden-import=pdfminer.converter --hidden-import=pdfminer.pdfinterp --hidden-import=pdfminer.pdfdevice --hidden-import=customtkinter --hidden-import=openpyxl --hidden-import=openpyxl.styles --hidden-import=pandas --hidden-import=pandas.io.formats.excel --hidden-import=matplotlib --hidden-import=matplotlib.backends.backend_tkagg --hidden-import=matplotlib.backends.backend_agg --hidden-import=requests --hidden-import=charset_normalizer --hidden-import=PIL --hidden-import=tkinter --hidden-import=tkinter.ttk --hidden-import=tkinter.messagebox --hidden-import=tkinter.filedialog --hidden-import=_tkinter --collect-all customtkinter --collect-all pdfplumber --collect-all pdfminer --collect-all matplotlib app.py
 
-                - name: Build Linux binary
-                  run: |
-                    python3 -c "
-          import tkinter
-          import os
-          tk_path = os.path.dirname(tkinter.__file__)
-          print(f'tkinter path: {tk_path}')
-          "
-                    pyinstaller \
-                      --onefile \
-                      --name ResultAnalyzer \
-                      --additional-hooks-dir=hooks \
-                      --hidden-import=pdfplumber \
-                      --hidden-import=pdfminer \
-                      --hidden-import=pdfminer.high_level \
-                      --hidden-import=pdfminer.layout \
-                      --hidden-import=pdfminer.converter \
-                      --hidden-import=pdfminer.pdfinterp \
-                      --hidden-import=pdfminer.pdfdevice \
-                      --hidden-import=customtkinter \
-                      --hidden-import=openpyxl \
-                      --hidden-import=openpyxl.styles \
-                      --hidden-import=pandas \
-                      --hidden-import=pandas.io.formats.excel \
-                      --hidden-import=matplotlib \
-                      --hidden-import=matplotlib.backends.backend_tkagg \
-                      --hidden-import=matplotlib.backends.backend_agg \
-                      --hidden-import=requests \
-                      --hidden-import=charset_normalizer \
-                      --hidden-import=PIL \
-                      --hidden-import=tkinter \
-                      --hidden-import=tkinter.ttk \
-                      --hidden-import=tkinter.messagebox \
-                      --hidden-import=tkinter.filedialog \
-                      --hidden-import=_tkinter \
-                      --collect-all customtkinter \
-                      --collect-all pdfplumber \
-                      --collect-all pdfminer \
-                      --collect-all matplotlib \
-                      app.py
-
-                - name: Test binary
-                  run: |
-                    echo "Binary size:"
-                    ls -lh dist/ResultAnalyzer
-                    echo "Binary type:"
-                    file dist/ResultAnalyzer
-
-                - name: Resize icons
-                  run: |
-                    python3 - << 'PYEOF'
+      - name: Resize icons
+        run: |
+          python3 - << 'PYEOF'
           import os
           from PIL import Image
-
           if not os.path.exists("logo.png"):
               print("logo.png not found, skipping")
           else:
               img = Image.open("logo.png")
               for size in [256, 128, 64, 48, 32]:
-                  folder = f"icons/{size}x{size}"
+                  folder = "icons/{}x{}".format(size, size)
                   os.makedirs(folder, exist_ok=True)
-                  img.resize((size, size), Image.LANCZOS).save(f"{folder}/result-analyzer.png")
+                  img.resize((size, size), Image.LANCZOS).save("{}/result-analyzer.png".format(folder))
               print("Icons created!")
           PYEOF
-
-                - name: Create .deb package
+          
+                - name: Create wrapper script
+                  run: |
+                    printf '#!/bin/bash\nexport DISPLAY=${DISPLAY:-:0}\nexport GDK_BACKEND=x11\nexport LIBGL_ALWAYS_SOFTWARE=1\nexport LC_ALL=C.UTF-8\nexport LANG=C.UTF-8\nunset SESSION_MANAGER\nunset DBUS_SESSION_BUS_ADDRESS\nif [ -d /usr/share/tcltk/tcl8.6 ]; then export TCL_LIBRARY=/usr/share/tcltk/tcl8.6; fi\nif [ -d /usr/share/tcltk/tk8.6 ]; then export TK_LIBRARY=/usr/share/tcltk/tk8.6; fi\nexec /usr/local/bin/result-analyzer-bin "$@"\n' > wrapper.sh
+                    chmod +x wrapper.sh
+          
+                - name: Create desktop file
+                  run: |
+                    printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=College Result Analyzer\nComment=Professional result analysis software\nExec=ResultAnalyzer\nIcon=result-analyzer\nTerminal=false\nCategories=Education;Office;\nStartupNotify=true\n' > result-analyzer.desktop
+          
+                - name: Create control file
+                  run: |
+                    printf 'Package: result-analyzer\nVersion: 1.0.0\nArchitecture: amd64\nMaintainer: Developer <dev@email.com>\nDepends: libx11-6, libglib2.0-0, libgl1-mesa-glx, python3-tk, libfreetype6, libfontconfig1, libxcb1\nDescription: College Result Analyzer\n Professional result analysis software for colleges.\n' > control
+          
+                - name: Create postinst script
+                  run: |
+                    printf '#!/bin/bash\nset -e\nupdate-desktop-database /usr/share/applications 2>/dev/null || true\ngtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true\nexit 0\n' > postinst
+                    chmod +x postinst
+          
+                - name: Build deb package
                   run: |
                     mkdir -p pkg/DEBIAN
                     mkdir -p pkg/usr/local/bin
@@ -149,29 +77,14 @@ jobs:
                     mkdir -p pkg/usr/share/icons/hicolor/128x128/apps
                     mkdir -p pkg/usr/share/icons/hicolor/64x64/apps
                     mkdir -p pkg/usr/share/icons/hicolor/48x48/apps
-
+          
                     cp dist/ResultAnalyzer pkg/usr/local/bin/result-analyzer-bin
                     chmod +x pkg/usr/local/bin/result-analyzer-bin
-
-                    cat > pkg/usr/local/bin/ResultAnalyzer << 'WRAPPER'
-          #!/bin/bash
-          export DISPLAY=${DISPLAY:-:0}
-          export GDK_BACKEND=x11
-          export LIBGL_ALWAYS_SOFTWARE=1
-          export LC_ALL=C.UTF-8
-          export LANG=C.UTF-8
-          unset SESSION_MANAGER
-          unset DBUS_SESSION_BUS_ADDRESS
-          if [ -d /usr/share/tcltk/tcl8.6 ]; then
-            export TCL_LIBRARY=/usr/share/tcltk/tcl8.6
-          fi
-          if [ -d /usr/share/tcltk/tk8.6 ]; then
-            export TK_LIBRARY=/usr/share/tcltk/tk8.6
-          fi
-          exec /usr/local/bin/result-analyzer-bin "$@"
-          WRAPPER
-                    chmod +x pkg/usr/local/bin/ResultAnalyzer
-
+                    cp wrapper.sh pkg/usr/local/bin/ResultAnalyzer
+                    cp result-analyzer.desktop pkg/usr/share/applications/
+                    cp control pkg/DEBIAN/control
+                    cp postinst pkg/DEBIAN/postinst
+          
                     if [ -f "logo.png" ]; then
                       cp logo.png pkg/usr/share/pixmaps/result-analyzer.png
                       for size in 256x256 128x128 64x64 48x48; do
@@ -180,37 +93,10 @@ jobs:
                         fi
                       done
                     fi
-
-                    echo "[Desktop Entry]" > pkg/usr/share/applications/result-analyzer.desktop
-                    echo "Version=1.0" >> pkg/usr/share/applications/result-analyzer.desktop
-                    echo "Type=Application" >> pkg/usr/share/applications/result-analyzer.desktop
-                    echo "Name=College Result Analyzer" >> pkg/usr/share/applications/result-analyzer.desktop
-                    echo "Comment=Professional result analysis software" >> pkg/usr/share/applications/result-analyzer.desktop
-                    echo "Exec=ResultAnalyzer" >> pkg/usr/share/applications/result-analyzer.desktop
-                    echo "Icon=result-analyzer" >> pkg/usr/share/applications/result-analyzer.desktop
-                    echo "Terminal=false" >> pkg/usr/share/applications/result-analyzer.desktop
-                    echo "Categories=Education;Office;" >> pkg/usr/share/applications/result-analyzer.desktop
-                    echo "StartupNotify=true" >> pkg/usr/share/applications/result-analyzer.desktop
-
-                    echo "Package: result-analyzer" > pkg/DEBIAN/control
-                    echo "Version: 1.0.0" >> pkg/DEBIAN/control
-                    echo "Architecture: amd64" >> pkg/DEBIAN/control
-                    echo "Maintainer: Developer <dev@email.com>" >> pkg/DEBIAN/control
-                    echo "Depends: libx11-6, libglib2.0-0, libgl1-mesa-glx, python3-tk, libfreetype6, libfontconfig1, libxcb1" >> pkg/DEBIAN/control
-                    echo "Description: College Result Analyzer" >> pkg/DEBIAN/control
-                    echo " Professional result analysis software for colleges." >> pkg/DEBIAN/control
-
-                    echo "#!/bin/bash" > pkg/DEBIAN/postinst
-                    echo "set -e" >> pkg/DEBIAN/postinst
-                    echo "update-desktop-database /usr/share/applications 2>/dev/null || true" >> pkg/DEBIAN/postinst
-                    echo "gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true" >> pkg/DEBIAN/postinst
-                    echo "exit 0" >> pkg/DEBIAN/postinst
-                    chmod +x pkg/DEBIAN/postinst
-
+          
                     dpkg-deb --build pkg result-analyzer_1.0.0.deb
-                    echo "deb package created!"
                     ls -lh result-analyzer_1.0.0.deb
-
+          
                 - name: Upload artifacts
                   uses: actions/upload-artifact@v4
                   with:
