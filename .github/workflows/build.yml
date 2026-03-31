@@ -23,8 +23,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install --upgrade pip
-          pip install --upgrade setuptools wheel pkg_resources
+          pip install --upgrade pip setuptools wheel
           pip install pyinstaller
           pip install customtkinter pdfplumber pandas matplotlib requests openpyxl pillow
 
