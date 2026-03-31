@@ -22,87 +22,21 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y python3-tk tk8.6 tcl8.6 libtk8.6 libtcl8.6 libx11-6 libxft2 libxext6 libglib2.0-0 libgl1-mesa-glx libfreetype6 libfontconfig1 libdbus-1-3 libxkbcommon0 libxkbcommon-x11-0 libxcb1 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 fonts-dejavu binutils
 
       - name: Install Python dependencies
-        run: pip install --upgrade pip setuptools wheel "pyinstaller==5.13.2" customtkinter pdfplumber pandas matplotlib requests openpyxl pillow
-
-      - name: Build Linux binary (onedir)
         run: |
-          pyinstaller --onedir --windowed --name ResultAnalyzer app.py \
-          --collect-all customtkinter \
-          --collect-all tkinter \
-          --collect-all matplotlib \
-          --collect-all pdfplumber \
-          --collect-all pdfminer \
-          --hidden-import=pdfminer.high_level \
-          --hidden-import=openpyxl \
-          --hidden-import=pandas \
-          --hidden-import=requests \
-          --hidden-import=PIL \
-          app.py
+          pip install --upgrade pip
+          pip install --upgrade setuptools wheel pkg_resources
+          pip install pyinstaller
+          pip install customtkinter pdfplumber pandas matplotlib requests openpyxl pillow
 
-      - name: Check dist folder
-        run: |
-          ls -la
-          ls -la dist
-          ls -la dist/ResultAnalyzer
-
-      - name: Resize icons
-        run: |
-          python3 - << 'PYEOF'
-          import os
-          from PIL import Image
-
-          if not os.path.exists("logo.png"):
-              print("logo.png not found, skipping")
-          else:
-              img = Image.open("logo.png")
-              for size in [256,128,64,48,32]:
-                  folder = f"icons/{size}x{size}"
-                  os.makedirs(folder, exist_ok=True)
-                  img.resize((size,size), Image.LANCZOS).save(f"{folder}/result-analyzer.png")
-              print("Icons created!")
-          PYEOF
-
-      - name: Create wrapper script
-        run: |
-          printf '#!/bin/bash\nexport DISPLAY=${DISPLAY:-:0}\nexport MPLBACKEND=TkAgg\nexport TCL_LIBRARY=/usr/share/tcltk/tcl8.6\nexport TK_LIBRARY=/usr/share/tcltk/tk8.6\ncd /usr/local/bin/ResultAnalyzer\n./ResultAnalyzer "$@"\n' > wrapper.sh
-          chmod +x wrapper.sh
-
-      - name: Create desktop file
-        run: |
-          printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=College Result Analyzer\nComment=Professional result analysis software\nExec=ResultAnalyzer\nIcon=result-analyzer\nTerminal=false\nCategories=Education;Office;\nStartupNotify=true\n' > result-analyzer.desktop
-
-      - name: Create control file
-        run: |
-          printf 'Package: result-analyzer\nVersion: 1.0.0\nArchitecture: amd64\nMaintainer: Developer <dev@email.com>\nDepends: libx11-6, libglib2.0-0, libgl1-mesa-glx, python3-tk, libfreetype6, libfontconfig1, libxcb1, libxext6, libxrender1, libsm6, libice6\nDescription: College Result Analyzer\n Professional result analysis software for colleges.\n' > control
-
-      - name: Create postinst script
-        run: |
-          printf '#!/bin/bash\nset -e\nupdate-desktop-database /usr/share/applications 2>/dev/null || true\ngtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true\nexit 0\n' > postinst
-          chmod +x postinst
-
-      - name: Build deb package
-        run: |
-          mkdir -p pkg/DEBIAN
-          mkdir -p pkg/usr/local/bin
-          mkdir -p pkg/usr/share/applications
-          mkdir -p pkg/usr/share/pixmaps
-
-          cp -r dist/ResultAnalyzer pkg/usr/local/bin/
-          cp wrapper.sh pkg/usr/local/bin/ResultAnalyzer
-          chmod +x pkg/usr/local/bin/ResultAnalyzer
-
-          cp result-analyzer.desktop pkg/usr/share/applications/
-          cp control pkg/DEBIAN/control
-          cp postinst pkg/DEBIAN/postinst
-
-          if [ -f "logo.png" ]; then
-            cp logo.png pkg/usr/share/pixmaps/result-analyzer.png
-          fi
-
-          dpkg-deb --build pkg result-analyzer_1.0.0.deb
-          ls -lh result-analyzer_1.0.0.deb
       - name: Run build script
         run: python3 build_linux.py
+
+      - name: Check output
+        run: |
+          echo "=== dist folder ==="
+          ls -lh dist/ || echo "dist folder missing!"
+          echo "=== deb file ==="
+          ls -lh *.deb || echo "deb file missing!"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
