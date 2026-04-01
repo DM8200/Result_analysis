@@ -1,9 +1,8 @@
 """
 build_linux.py
-This script is run by GitHub Actions to:
-1. Build Linux binary with PyInstaller
-2. Create .deb package with icon
-Run: python3 build_linux.py
+Uses --onedir instead of --onefile to avoid segfault on Linux.
+onedir = folder with all files (more stable on Linux)
+onefile = single binary (causes segfault on Linux sometimes)
 """
 
 import os
@@ -11,20 +10,25 @@ import sys
 import shutil
 import subprocess
 
-# ── Config ──
 APP_NAME    = "ResultAnalyzer"
 DEB_NAME    = "result-analyzer"
 VERSION     = "1.0.0"
 MAINTAINER  = "Developer <dev@email.com>"
 DESCRIPTION = "College Result Analyzer"
 
-# ── Step 1: Build with PyInstaller ──
-print("\n[1/3] Building with PyInstaller...")
+
+# ── Step 1: Build with PyInstaller (onedir mode) ──
+print("\n[1/3] Building with PyInstaller (onedir mode)...")
 
 cmd = [
     "pyinstaller",
-    "--onefile",
+    "--onedir",          # ← changed from --onefile to --onedir
     "--name", APP_NAME,
+    "--hidden-import=tkinter",
+    "--hidden-import=tkinter.ttk",
+    "--hidden-import=tkinter.messagebox",
+    "--hidden-import=tkinter.filedialog",
+    "--hidden-import=_tkinter",
     "--hidden-import=pdfplumber",
     "--hidden-import=pdfminer",
     "--hidden-import=pdfminer.high_level",
@@ -43,15 +47,15 @@ cmd = [
     "--hidden-import=requests",
     "--hidden-import=charset_normalizer",
     "--hidden-import=PIL",
-    "--hidden-import=tkinter",
-    "--hidden-import=tkinter.ttk",
-    "--hidden-import=tkinter.messagebox",
-    "--hidden-import=tkinter.filedialog",
-    "--hidden-import=_tkinter",
     "--collect-all", "customtkinter",
     "--collect-all", "pdfplumber",
     "--collect-all", "pdfminer",
     "--collect-all", "matplotlib",
+    "--exclude-module", "PyQt5",
+    "--exclude-module", "PyQt6",
+    "--exclude-module", "PySide2",
+    "--exclude-module", "PySide6",
+    "--exclude-module", "wx",
     "app.py"
 ]
 
@@ -60,18 +64,24 @@ if result.returncode != 0:
     print("PyInstaller failed!")
     sys.exit(1)
 
-binary_path = f"dist/{APP_NAME}"
+# onedir puts files in dist/ResultAnalyzer/ folder
+binary_dir  = f"dist/{APP_NAME}"
+binary_path = f"dist/{APP_NAME}/{APP_NAME}"
+
 if not os.path.exists(binary_path):
     print(f"Binary not found: {binary_path}")
     sys.exit(1)
 
-print(f"Binary created: {binary_path}")
-print(f"Binary size: {os.path.getsize(binary_path) // (1024*1024)} MB")
+size_mb = sum(
+    os.path.getsize(os.path.join(dp, f))
+    for dp, dn, fn in os.walk(binary_dir)
+    for f in fn
+) // (1024 * 1024)
+print(f"Binary folder created: {binary_dir} ({size_mb} MB)")
 
 
 # ── Step 2: Resize icons ──
 print("\n[2/3] Creating icons...")
-
 try:
     from PIL import Image
     if os.path.exists("logo.png"):
@@ -79,21 +89,23 @@ try:
         for size in [256, 128, 64, 48, 32]:
             folder = f"icons/{size}x{size}"
             os.makedirs(folder, exist_ok=True)
-            img.resize((size, size), Image.LANCZOS).save(f"{folder}/result-analyzer.png")
+            img.resize((size, size), Image.LANCZOS).save(
+                f"{folder}/result-analyzer.png"
+            )
         print("Icons created!")
     else:
         print("logo.png not found - skipping icons")
 except Exception as e:
-    print(f"Icon creation failed: {e} - continuing anyway")
+    print(f"Icon error: {e} - continuing")
 
 
 # ── Step 3: Create .deb package ──
 print("\n[3/3] Creating .deb package...")
 
-# Create folder structure
 dirs = [
     "pkg/DEBIAN",
     "pkg/usr/local/bin",
+    "pkg/opt/result-analyzer",   # ← app folder goes here
     "pkg/usr/share/applications",
     "pkg/usr/share/pixmaps",
     "pkg/usr/share/icons/hicolor/256x256/apps",
@@ -104,11 +116,19 @@ dirs = [
 for d in dirs:
     os.makedirs(d, exist_ok=True)
 
-# Copy binary
-shutil.copy(binary_path, f"pkg/usr/local/bin/result-analyzer-bin")
-os.chmod(f"pkg/usr/local/bin/result-analyzer-bin", 0o755)
+# Copy entire app folder to /opt/result-analyzer/
+print("Copying app folder...")
+shutil.copytree(
+    binary_dir,
+    "pkg/opt/result-analyzer/app",
+    dirs_exist_ok=True
+)
 
-# Create wrapper script
+# Make binary executable
+bin_in_pkg = f"pkg/opt/result-analyzer/app/{APP_NAME}"
+os.chmod(bin_in_pkg, 0o755)
+
+# Wrapper script in /usr/local/bin/
 wrapper = """#!/bin/bash
 export DISPLAY=${DISPLAY:-:0}
 export GDK_BACKEND=x11
@@ -117,19 +137,29 @@ export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
-if [ -d /usr/share/tcltk/tcl8.6 ]; then
-  export TCL_LIBRARY=/usr/share/tcltk/tcl8.6
-fi
-if [ -d /usr/share/tcltk/tk8.6 ]; then
-  export TK_LIBRARY=/usr/share/tcltk/tk8.6
-fi
-exec /usr/local/bin/result-analyzer-bin "$@"
+for TCL_VER in 8.6 8.5; do
+    if [ -d "/usr/share/tcltk/tcl${TCL_VER}" ]; then
+        export TCL_LIBRARY="/usr/share/tcltk/tcl${TCL_VER}"
+        break
+    fi
+done
+for TK_VER in 8.6 8.5; do
+    if [ -d "/usr/share/tcltk/tk${TK_VER}" ]; then
+        export TK_LIBRARY="/usr/share/tcltk/tk${TK_VER}"
+        break
+    fi
+done
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/tmp/runtime-$(id -u)}
+mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null
+chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null
+cd /opt/result-analyzer/app
+exec ./ResultAnalyzer "$@"
 """
 with open("pkg/usr/local/bin/ResultAnalyzer", "w") as f:
     f.write(wrapper)
 os.chmod("pkg/usr/local/bin/ResultAnalyzer", 0o755)
 
-# Copy icons
+# Icons
 if os.path.exists("logo.png"):
     shutil.copy("logo.png", "pkg/usr/share/pixmaps/result-analyzer.png")
 for size in ["256x256", "128x128", "64x64", "48x48"]:
@@ -138,7 +168,7 @@ for size in ["256x256", "128x128", "64x64", "48x48"]:
     if os.path.exists(src):
         shutil.copy(src, dst)
 
-# Create desktop file
+# Desktop file
 desktop = """[Desktop Entry]
 Version=1.0
 Type=Application
@@ -153,19 +183,19 @@ StartupNotify=true
 with open("pkg/usr/share/applications/result-analyzer.desktop", "w") as f:
     f.write(desktop)
 
-# Create control file
+# Control file
 control = f"""Package: {DEB_NAME}
 Version: {VERSION}
 Architecture: amd64
 Maintainer: {MAINTAINER}
-Depends: libx11-6, libglib2.0-0, libgl1-mesa-glx, python3-tk, libfreetype6, libfontconfig1, libxcb1
+Depends: libx11-6, libglib2.0-0, libgl1-mesa-glx, python3-tk, libfreetype6, libfontconfig1, libxcb1, libtk8.6, libtcl8.6
 Description: {DESCRIPTION}
  Professional result analysis software for colleges.
 """
 with open("pkg/DEBIAN/control", "w") as f:
     f.write(control)
 
-# Create postinst
+# Postinst
 postinst = """#!/bin/bash
 set -e
 update-desktop-database /usr/share/applications 2>/dev/null || true
@@ -177,12 +207,14 @@ with open("pkg/DEBIAN/postinst", "w") as f:
 os.chmod("pkg/DEBIAN/postinst", 0o755)
 
 # Build deb
-result = subprocess.run(["dpkg-deb", "--build", "pkg", f"{DEB_NAME}_{VERSION}.deb"])
+result = subprocess.run(
+    ["dpkg-deb", "--build", "pkg", f"{DEB_NAME}_{VERSION}.deb"]
+)
 if result.returncode != 0:
     print("dpkg-deb failed!")
     sys.exit(1)
 
 deb_path = f"{DEB_NAME}_{VERSION}.deb"
-print(f"Deb package created: {deb_path}")
-print(f"Deb size: {os.path.getsize(deb_path) // (1024*1024)} MB")
+deb_size = os.path.getsize(deb_path) // (1024*1024)
+print(f"Deb package created: {deb_path} ({deb_size} MB)")
 print("\nBuild complete!")
