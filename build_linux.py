@@ -1,14 +1,16 @@
 """
 build_linux.py
-Uses --onedir instead of --onefile to avoid segfault on Linux.
-onedir = folder with all files (more stable on Linux)
-onefile = single binary (causes segfault on Linux sometimes)
+Packages the Python source files inside .deb
+Runs with system Python (no PyInstaller = no segfault)
+Code is protected by compiling to .pyc bytecode
 """
 
 import os
 import sys
 import shutil
 import subprocess
+import py_compile
+import compileall
 
 APP_NAME    = "ResultAnalyzer"
 DEB_NAME    = "result-analyzer"
@@ -16,68 +18,26 @@ VERSION     = "1.0.0"
 MAINTAINER  = "Developer <dev@email.com>"
 DESCRIPTION = "College Result Analyzer"
 
+# Python files to compile and package
+PY_FILES = ["app.py", "pdf_parser.py", "license_client.py"]
 
-# ── Step 1: Build with PyInstaller (onedir mode) ──
-print("\n[1/3] Building with PyInstaller (onedir mode)...")
 
-cmd = [
-    "pyinstaller",
-    "--onedir",          # ← changed from --onefile to --onedir
-    "--name", APP_NAME,
-    "--hidden-import=tkinter",
-    "--hidden-import=tkinter.ttk",
-    "--hidden-import=tkinter.messagebox",
-    "--hidden-import=tkinter.filedialog",
-    "--hidden-import=_tkinter",
-    "--hidden-import=pdfplumber",
-    "--hidden-import=pdfminer",
-    "--hidden-import=pdfminer.high_level",
-    "--hidden-import=pdfminer.layout",
-    "--hidden-import=pdfminer.converter",
-    "--hidden-import=pdfminer.pdfinterp",
-    "--hidden-import=pdfminer.pdfdevice",
-    "--hidden-import=customtkinter",
-    "--hidden-import=openpyxl",
-    "--hidden-import=openpyxl.styles",
-    "--hidden-import=pandas",
-    "--hidden-import=pandas.io.formats.excel",
-    "--hidden-import=matplotlib",
-    "--hidden-import=matplotlib.backends.backend_tkagg",
-    "--hidden-import=matplotlib.backends.backend_agg",
-    "--hidden-import=requests",
-    "--hidden-import=charset_normalizer",
-    "--hidden-import=PIL",
-    "--collect-all", "customtkinter",
-    "--collect-all", "pdfplumber",
-    "--collect-all", "pdfminer",
-    "--collect-all", "matplotlib",
-    "--exclude-module", "PyQt5",
-    "--exclude-module", "PyQt6",
-    "--exclude-module", "PySide2",
-    "--exclude-module", "PySide6",
-    "--exclude-module", "wx",
-    "app.py"
-]
+# ── Step 1: Compile .py to .pyc ──
+print("\n[1/3] Compiling Python files to bytecode...")
 
-result = subprocess.run(cmd)
-if result.returncode != 0:
-    print("PyInstaller failed!")
-    sys.exit(1)
+os.makedirs("compiled", exist_ok=True)
 
-# onedir puts files in dist/ResultAnalyzer/ folder
-binary_dir  = f"dist/{APP_NAME}"
-binary_path = f"dist/{APP_NAME}/{APP_NAME}"
+for pyfile in PY_FILES:
+    if not os.path.exists(pyfile):
+        print(f"  ERROR: {pyfile} not found!")
+        sys.exit(1)
+    
+    out = f"compiled/{pyfile}c"
+    py_compile.compile(pyfile, cfile=out, optimize=2, doraise=True)
+    size = os.path.getsize(out)
+    print(f"  Compiled: {pyfile} -> {out} ({size} bytes)")
 
-if not os.path.exists(binary_path):
-    print(f"Binary not found: {binary_path}")
-    sys.exit(1)
-
-size_mb = sum(
-    os.path.getsize(os.path.join(dp, f))
-    for dp, dn, fn in os.walk(binary_dir)
-    for f in fn
-) // (1024 * 1024)
-print(f"Binary folder created: {binary_dir} ({size_mb} MB)")
+print("  Compilation complete!")
 
 
 # ── Step 2: Resize icons ──
@@ -92,11 +52,11 @@ try:
             img.resize((size, size), Image.LANCZOS).save(
                 f"{folder}/result-analyzer.png"
             )
-        print("Icons created!")
+        print("  Icons created!")
     else:
-        print("logo.png not found - skipping icons")
+        print("  logo.png not found - skipping")
 except Exception as e:
-    print(f"Icon error: {e} - continuing")
+    print(f"  Icon error: {e}")
 
 
 # ── Step 3: Create .deb package ──
@@ -105,7 +65,7 @@ print("\n[3/3] Creating .deb package...")
 dirs = [
     "pkg/DEBIAN",
     "pkg/usr/local/bin",
-    "pkg/opt/result-analyzer",   # ← app folder goes here
+    "pkg/opt/result-analyzer",
     "pkg/usr/share/applications",
     "pkg/usr/share/pixmaps",
     "pkg/usr/share/icons/hicolor/256x256/apps",
@@ -116,47 +76,43 @@ dirs = [
 for d in dirs:
     os.makedirs(d, exist_ok=True)
 
-# Copy entire app folder to /opt/result-analyzer/
-print("Copying app folder...")
-shutil.copytree(
-    binary_dir,
-    "pkg/opt/result-analyzer/app",
-    dirs_exist_ok=True
-)
+# Copy compiled .pyc files to /opt/result-analyzer/
+for pyfile in PY_FILES:
+    src = f"compiled/{pyfile}c"
+    dst = f"pkg/opt/result-analyzer/{pyfile}c"
+    shutil.copy(src, dst)
+    print(f"  Copied: {dst}")
 
-# Make binary executable
-bin_in_pkg = f"pkg/opt/result-analyzer/app/{APP_NAME}"
-os.chmod(bin_in_pkg, 0o755)
+# Copy logo to app folder
+if os.path.exists("logo.png"):
+    shutil.copy("logo.png", "pkg/opt/result-analyzer/logo.png")
 
-# Wrapper script in /usr/local/bin/
-wrapper = """#!/bin/bash
-export DISPLAY=${DISPLAY:-:0}
-export GDK_BACKEND=x11
-export LIBGL_ALWAYS_SOFTWARE=1
-export LC_ALL=C.UTF-8
-export LANG=C.UTF-8
-unset SESSION_MANAGER
-unset DBUS_SESSION_BUS_ADDRESS
-for TCL_VER in 8.6 8.5; do
-    if [ -d "/usr/share/tcltk/tcl${TCL_VER}" ]; then
-        export TCL_LIBRARY="/usr/share/tcltk/tcl${TCL_VER}"
-        break
-    fi
-done
-for TK_VER in 8.6 8.5; do
-    if [ -d "/usr/share/tcltk/tk${TK_VER}" ]; then
-        export TK_LIBRARY="/usr/share/tcltk/tk${TK_VER}"
-        break
-    fi
-done
-export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/tmp/runtime-$(id -u)}
-mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null
-chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null
-cd /opt/result-analyzer/app
-exec ./ResultAnalyzer "$@"
+# Main launcher script
+launcher = """#!/bin/bash
+# College Result Analyzer - Launcher
+# Runs with system Python (stable, no segfault)
+
+APP_DIR="/opt/result-analyzer"
+VENV_DIR="$HOME/.result-analyzer-env"
+
+# Create virtual environment if not exists
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Setting up environment (first time only)..."
+    python3 -m venv "$VENV_DIR"
+    source "$VENV_DIR/bin/activate"
+    pip install --quiet --upgrade pip
+    pip install --quiet customtkinter pdfplumber pandas matplotlib requests openpyxl pillow
+    echo "Setup complete!"
+fi
+
+source "$VENV_DIR/bin/activate"
+
+# Run the app
+cd "$APP_DIR"
+exec python3 app.pyc "$@"
 """
 with open("pkg/usr/local/bin/ResultAnalyzer", "w") as f:
-    f.write(wrapper)
+    f.write(launcher)
 os.chmod("pkg/usr/local/bin/ResultAnalyzer", 0o755)
 
 # Icons
@@ -186,20 +142,23 @@ with open("pkg/usr/share/applications/result-analyzer.desktop", "w") as f:
 # Control file
 control = f"""Package: {DEB_NAME}
 Version: {VERSION}
-Architecture: amd64
+Architecture: all
 Maintainer: {MAINTAINER}
-Depends: libx11-6, libglib2.0-0, libgl1-mesa-glx, python3-tk, libfreetype6, libfontconfig1, libxcb1, libtk8.6, libtcl8.6
+Depends: python3, python3-pip, python3-tk, python3-venv
 Description: {DESCRIPTION}
  Professional result analysis software for colleges.
 """
 with open("pkg/DEBIAN/control", "w") as f:
     f.write(control)
 
-# Postinst
+# Postinst — installs Python packages on customer PC
 postinst = """#!/bin/bash
 set -e
+
+# Update desktop database
 update-desktop-database /usr/share/applications 2>/dev/null || true
 gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+
 exit 0
 """
 with open("pkg/DEBIAN/postinst", "w") as f:
@@ -215,6 +174,6 @@ if result.returncode != 0:
     sys.exit(1)
 
 deb_path = f"{DEB_NAME}_{VERSION}.deb"
-deb_size = os.path.getsize(deb_path) // (1024*1024)
-print(f"Deb package created: {deb_path} ({deb_size} MB)")
-print("\nBuild complete!")
+deb_size = os.path.getsize(deb_path) // (1024)
+print(f"\nDeb package: {deb_path} ({deb_size} KB)")
+print("Build complete!")
