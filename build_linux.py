@@ -1,13 +1,14 @@
 """
 build_linux.py
-Uses Python 3.11 which fixes customtkinter segfault on Ubuntu 22.04
+Ships .py files inside .deb
+Compiles to .pyc ON CUSTOMER PC using their Python version
+This avoids the "Bad magic number" error completely
 """
 
 import os
 import sys
 import shutil
 import subprocess
-import py_compile
 
 APP_NAME    = "ResultAnalyzer"
 DEB_NAME    = "result-analyzer"
@@ -18,16 +19,13 @@ DESCRIPTION = "College Result Analyzer"
 PY_FILES = ["app.py", "pdf_parser.py", "license_client.py"]
 
 
-# ── Step 1: Compile .py to .pyc ──
-print("\n[1/3] Compiling Python files...")
-os.makedirs("compiled", exist_ok=True)
+# ── Step 1: Verify all py files exist ──
+print("\n[1/3] Checking Python files...")
 for pyfile in PY_FILES:
     if not os.path.exists(pyfile):
         print(f"  ERROR: {pyfile} not found!")
         sys.exit(1)
-    out = f"compiled/{pyfile}c"
-    py_compile.compile(pyfile, cfile=out, optimize=2, doraise=True)
-    print(f"  Compiled: {pyfile} -> {out}")
+    print(f"  Found: {pyfile}")
 print("  Done!")
 
 
@@ -65,97 +63,59 @@ dirs = [
 for d in dirs:
     os.makedirs(d, exist_ok=True)
 
-# Copy compiled files
+# Copy .py files (will be compiled on customer PC)
 for pyfile in PY_FILES:
-    shutil.copy(f"compiled/{pyfile}c", f"pkg/opt/result-analyzer/{pyfile}c")
-    print(f"  Copied: {pyfile}c")
+    shutil.copy(pyfile, f"pkg/opt/result-analyzer/{pyfile}")
+    print(f"  Copied: {pyfile}")
 
 if os.path.exists("logo.png"):
     shutil.copy("logo.png", "pkg/opt/result-analyzer/logo.png")
 
-# ── Launcher — tries Python 3.11 first, falls back to 3.10/3 ──
+# ── Launcher script ──
 launcher = r"""#!/bin/bash
 # College Result Analyzer Launcher
 
 APP_DIR="/opt/result-analyzer"
 LIBS="customtkinter pdfplumber pandas matplotlib requests openpyxl pillow"
+COMPILED_FLAG="$APP_DIR/.compiled_ok"
 
-# Find best Python version (3.11 fixes customtkinter segfault)
+# Find Python 3.11 first (fixes segfault), then fallback
 find_python() {
     for py in python3.11 python3.12 python3.10 python3; do
         if command -v "$py" > /dev/null 2>&1; then
-            # Test if customtkinter works with this Python
-            if "$py" -c "import customtkinter" 2>/dev/null; then
+            if "$py" -c "import tkinter" 2>/dev/null; then
                 echo "$py"
                 return 0
             fi
         fi
     done
-    # Return first available Python even if customtkinter not yet installed
-    for py in python3.11 python3.12 python3.10 python3; do
-        if command -v "$py" > /dev/null 2>&1; then
-            echo "$py"
-            return 0
-        fi
-    done
     echo "python3"
 }
 
-install_libs() {
-    local PYTHON="$1"
-    echo "Installing required libraries (first time only)..."
-
-    # Try pip install
-    "$PYTHON" -m pip install --user --quiet $LIBS 2>/dev/null || \
-    "$PYTHON" -m pip install --quiet $LIBS 2>/dev/null || \
-    sudo "$PYTHON" -m pip install --quiet $LIBS 2>/dev/null || true
-
-    echo "Libraries installed!"
-}
-
-install_python311() {
-    echo "Installing Python 3.11 (fixes display issues)..."
-    sudo add-apt-repository ppa:deadsnakes/ppa -y 2>/dev/null || true
-    sudo apt-get update -qq 2>/dev/null || true
-    sudo apt-get install -y python3.11 python3.11-tk python3.11-venv 2>/dev/null || true
-    curl -s https://bootstrap.pypa.io/get-pip.py | python3.11 2>/dev/null || true
-}
-
-# Find Python
 PYTHON=$(find_python)
-echo "Using: $PYTHON"
 
-# Check if libs installed
+# Install libraries if needed
 if ! "$PYTHON" -c "import customtkinter" 2>/dev/null; then
-    # Try installing libs with current Python
-    install_libs "$PYTHON"
-
-    # If still failing and python3.11 not available, install it
-    if ! "$PYTHON" -c "import customtkinter" 2>/dev/null; then
-        if ! command -v python3.11 > /dev/null 2>&1; then
-            install_python311
-        fi
-        PYTHON=$(find_python)
-        install_libs "$PYTHON"
-    fi
+    echo "Installing required libraries..."
+    "$PYTHON" -m pip install --user $LIBS 2>/dev/null || \
+    "$PYTHON" -m pip install $LIBS 2>/dev/null || \
+    sudo "$PYTHON" -m pip install $LIBS 2>/dev/null || true
 fi
 
-# Final check
-if ! "$PYTHON" -c "import customtkinter" 2>/dev/null; then
-    echo ""
-    echo "ERROR: Could not set up required libraries."
-    echo "Please run manually:"
-    echo "  sudo add-apt-repository ppa:deadsnakes/ppa -y"
-    echo "  sudo apt-get install python3.11 python3.11-tk"
-    echo "  python3.11 -m pip install customtkinter pdfplumber pandas matplotlib requests openpyxl pillow"
-    echo ""
-    read -p "Press Enter to exit..."
-    exit 1
+# Compile .py to .pyc using customer's Python (avoids magic number error)
+if [ ! -f "$COMPILED_FLAG" ] || [ ! -f "$APP_DIR/app.pyc" ]; then
+    echo "Optimizing for your system..."
+    "$PYTHON" -m compileall -b -q "$APP_DIR/" 2>/dev/null || true
+    touch "$COMPILED_FLAG"
 fi
 
-# Run app
+# Run app — use .pyc if exists, else .py
 cd "$APP_DIR"
-exec "$PYTHON" app.pyc "$@"
+if [ -f "app.pyc" ]; then
+    exec "$PYTHON" app.pyc "$@"
+else
+    exec "$PYTHON" app.py "$@"
+fi
 """
 with open("pkg/usr/local/bin/ResultAnalyzer", "w") as f:
     f.write(launcher)
@@ -197,7 +157,7 @@ Description: {DESCRIPTION}
 with open("pkg/DEBIAN/control", "w") as f:
     f.write(control)
 
-# Postinst — runs after .deb install
+# Postinst
 postinst = r"""#!/bin/bash
 set -e
 
@@ -205,30 +165,34 @@ LIBS="customtkinter pdfplumber pandas matplotlib requests openpyxl pillow"
 
 echo "Setting up College Result Analyzer..."
 
-# Install Python 3.11 (fixes segfault with customtkinter on Ubuntu 22.04)
+# Install Python 3.11 if not available
 if ! command -v python3.11 > /dev/null 2>&1; then
-    echo "Installing Python 3.11..."
     add-apt-repository ppa:deadsnakes/ppa -y 2>/dev/null || true
     apt-get update -qq 2>/dev/null || true
-    apt-get install -y python3.11 python3.11-tk python3.11-distutils 2>/dev/null || true
+    apt-get install -y python3.11 python3.11-tk 2>/dev/null || true
 fi
 
-# Install pip for python3.11
-if ! python3.11 -m pip --version > /dev/null 2>&1; then
-    curl -s https://bootstrap.pypa.io/get-pip.py | python3.11 2>/dev/null || true
-fi
+# Install pip
+for py in python3.11 python3.10 python3; do
+    if command -v "$py" > /dev/null 2>&1; then
+        if ! "$py" -m pip --version > /dev/null 2>&1; then
+            curl -s https://bootstrap.pypa.io/get-pip.py | "$py" 2>/dev/null || true
+        fi
+        echo "Installing libraries with $py..."
+        "$py" -m pip install --quiet $LIBS 2>/dev/null && break || true
+    fi
+done
 
-# Install libraries
-if command -v python3.11 > /dev/null 2>&1; then
-    echo "Installing Python libraries with Python 3.11..."
-    python3.11 -m pip install --quiet $LIBS 2>/dev/null || true
-else
-    echo "Installing Python libraries..."
-    pip3 install --quiet $LIBS 2>/dev/null || \
-    python3 -m pip install --quiet $LIBS 2>/dev/null || true
-fi
+# Compile .py files for this system's Python
+for py in python3.11 python3.10 python3; do
+    if command -v "$py" > /dev/null 2>&1; then
+        echo "Compiling for $py..."
+        "$py" -m compileall -b -q /opt/result-analyzer/ 2>/dev/null || true
+        touch /opt/result-analyzer/.compiled_ok
+        break
+    fi
+done
 
-# Update desktop
 update-desktop-database /usr/share/applications 2>/dev/null || true
 gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 
