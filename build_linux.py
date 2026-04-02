@@ -1,6 +1,6 @@
 """
 build_linux.py
-Packages Python files inside .deb with improved launcher.
+Uses Python 3.11 which fixes customtkinter segfault on Ubuntu 22.04
 """
 
 import os
@@ -73,76 +73,89 @@ for pyfile in PY_FILES:
 if os.path.exists("logo.png"):
     shutil.copy("logo.png", "pkg/opt/result-analyzer/logo.png")
 
-# ── Launcher script — installs venv + deps automatically ──
-launcher = """#!/bin/bash
+# ── Launcher — tries Python 3.11 first, falls back to 3.10/3 ──
+launcher = r"""#!/bin/bash
 # College Result Analyzer Launcher
 
 APP_DIR="/opt/result-analyzer"
-VENV_DIR="$HOME/.result-analyzer-env"
 LIBS="customtkinter pdfplumber pandas matplotlib requests openpyxl pillow"
 
-setup_environment() {
-    echo "Setting up environment (first time only, please wait)..."
-
-    # Install python3-venv if missing
-    if ! python3 -m venv --help > /dev/null 2>&1; then
-        echo "Installing python3-venv..."
-        sudo apt-get install -y python3-venv python3-pip 2>/dev/null || true
-    fi
-
-    # Try creating venv
-    if python3 -m venv "$VENV_DIR" 2>/dev/null; then
-        echo "Virtual environment created."
-        source "$VENV_DIR/bin/activate"
-        pip install --quiet --upgrade pip
-        pip install --quiet $LIBS
-        echo "Libraries installed!"
-    else
-        # venv failed — install system-wide with pip
-        echo "Installing libraries system-wide..."
-        pip3 install --user --quiet $LIBS 2>/dev/null || \
-        pip3 install --quiet $LIBS 2>/dev/null || \
-        sudo pip3 install --quiet $LIBS 2>/dev/null || true
-        echo "Libraries installed!"
-    fi
+# Find best Python version (3.11 fixes customtkinter segfault)
+find_python() {
+    for py in python3.11 python3.12 python3.10 python3; do
+        if command -v "$py" > /dev/null 2>&1; then
+            # Test if customtkinter works with this Python
+            if "$py" -c "import customtkinter" 2>/dev/null; then
+                echo "$py"
+                return 0
+            fi
+        fi
+    done
+    # Return first available Python even if customtkinter not yet installed
+    for py in python3.11 python3.12 python3.10 python3; do
+        if command -v "$py" > /dev/null 2>&1; then
+            echo "$py"
+            return 0
+        fi
+    done
+    echo "python3"
 }
 
-activate_environment() {
-    if [ -f "$VENV_DIR/bin/activate" ]; then
-        source "$VENV_DIR/bin/activate"
+install_libs() {
+    local PYTHON="$1"
+    echo "Installing required libraries (first time only)..."
+
+    # Try pip install
+    "$PYTHON" -m pip install --user --quiet $LIBS 2>/dev/null || \
+    "$PYTHON" -m pip install --quiet $LIBS 2>/dev/null || \
+    sudo "$PYTHON" -m pip install --quiet $LIBS 2>/dev/null || true
+
+    echo "Libraries installed!"
+}
+
+install_python311() {
+    echo "Installing Python 3.11 (fixes display issues)..."
+    sudo add-apt-repository ppa:deadsnakes/ppa -y 2>/dev/null || true
+    sudo apt-get update -qq 2>/dev/null || true
+    sudo apt-get install -y python3.11 python3.11-tk python3.11-venv 2>/dev/null || true
+    curl -s https://bootstrap.pypa.io/get-pip.py | python3.11 2>/dev/null || true
+}
+
+# Find Python
+PYTHON=$(find_python)
+echo "Using: $PYTHON"
+
+# Check if libs installed
+if ! "$PYTHON" -c "import customtkinter" 2>/dev/null; then
+    # Try installing libs with current Python
+    install_libs "$PYTHON"
+
+    # If still failing and python3.11 not available, install it
+    if ! "$PYTHON" -c "import customtkinter" 2>/dev/null; then
+        if ! command -v python3.11 > /dev/null 2>&1; then
+            install_python311
+        fi
+        PYTHON=$(find_python)
+        install_libs "$PYTHON"
     fi
-    # Also add user local bin to PATH
-    export PATH="$HOME/.local/bin:$PATH"
-    export PYTHONPATH="$HOME/.local/lib/python3/dist-packages:$PYTHONPATH"
-}
-
-check_libs() {
-    python3 -c "import customtkinter" 2>/dev/null
-    return $?
-}
-
-# Setup if needed
-if ! check_libs; then
-    setup_environment
 fi
 
-# Activate environment
-activate_environment
-
-# Check again
-if ! check_libs; then
+# Final check
+if ! "$PYTHON" -c "import customtkinter" 2>/dev/null; then
     echo ""
-    echo "ERROR: Could not install required libraries."
+    echo "ERROR: Could not set up required libraries."
     echo "Please run manually:"
-    echo "  sudo apt-get install python3-pip python3-venv python3-tk"
-    echo "  pip3 install customtkinter pdfplumber pandas matplotlib requests openpyxl pillow"
+    echo "  sudo add-apt-repository ppa:deadsnakes/ppa -y"
+    echo "  sudo apt-get install python3.11 python3.11-tk"
+    echo "  python3.11 -m pip install customtkinter pdfplumber pandas matplotlib requests openpyxl pillow"
     echo ""
+    read -p "Press Enter to exit..."
     exit 1
 fi
 
-# Run the app
+# Run app
 cd "$APP_DIR"
-exec python3 app.pyc "$@"
+exec "$PYTHON" app.pyc "$@"
 """
 with open("pkg/usr/local/bin/ResultAnalyzer", "w") as f:
     f.write(launcher)
@@ -172,36 +185,54 @@ StartupNotify=true
 with open("pkg/usr/share/applications/result-analyzer.desktop", "w") as f:
     f.write(desktop)
 
-# Control file — now depends on python3-pip too
+# Control file
 control = f"""Package: {DEB_NAME}
 Version: {VERSION}
 Architecture: all
 Maintainer: {MAINTAINER}
-Depends: python3, python3-pip, python3-tk
+Depends: python3, python3-tk
 Description: {DESCRIPTION}
  Professional result analysis software for colleges.
 """
 with open("pkg/DEBIAN/control", "w") as f:
     f.write(control)
 
-# Postinst — installs python3-venv and all libraries after .deb install
-postinst = """#!/bin/bash
+# Postinst — runs after .deb install
+postinst = r"""#!/bin/bash
 set -e
 
-echo "Installing required Python packages..."
+LIBS="customtkinter pdfplumber pandas matplotlib requests openpyxl pillow"
 
-# Install venv
-apt-get install -y python3-venv python3-pip 2>/dev/null || true
+echo "Setting up College Result Analyzer..."
 
-# Install Python libraries for all users
-pip3 install --quiet customtkinter pdfplumber pandas matplotlib requests openpyxl pillow 2>/dev/null || \
-pip3 install customtkinter pdfplumber pandas matplotlib requests openpyxl pillow 2>/dev/null || true
+# Install Python 3.11 (fixes segfault with customtkinter on Ubuntu 22.04)
+if ! command -v python3.11 > /dev/null 2>&1; then
+    echo "Installing Python 3.11..."
+    add-apt-repository ppa:deadsnakes/ppa -y 2>/dev/null || true
+    apt-get update -qq 2>/dev/null || true
+    apt-get install -y python3.11 python3.11-tk python3.11-distutils 2>/dev/null || true
+fi
+
+# Install pip for python3.11
+if ! python3.11 -m pip --version > /dev/null 2>&1; then
+    curl -s https://bootstrap.pypa.io/get-pip.py | python3.11 2>/dev/null || true
+fi
+
+# Install libraries
+if command -v python3.11 > /dev/null 2>&1; then
+    echo "Installing Python libraries with Python 3.11..."
+    python3.11 -m pip install --quiet $LIBS 2>/dev/null || true
+else
+    echo "Installing Python libraries..."
+    pip3 install --quiet $LIBS 2>/dev/null || \
+    python3 -m pip install --quiet $LIBS 2>/dev/null || true
+fi
 
 # Update desktop
 update-desktop-database /usr/share/applications 2>/dev/null || true
 gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 
-echo "Installation complete!"
+echo "Setup complete!"
 exit 0
 """
 with open("pkg/DEBIAN/postinst", "w") as f:
