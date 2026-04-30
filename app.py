@@ -825,6 +825,10 @@ class ResultAnalyzerApp(ctk.CTk):
         total_v = pd.to_numeric(pd.Series([row.get(info["tot_col"], "")]), errors="coerce").iloc[0]
         if pd.notna(total_v):
             return "PASS"
+        # Check overall result — Wh_Eli / ELIGIBLE students count as pass
+        overall = str(row.get("result", "")).strip().upper()
+        if overall in ("ELIGIBLE", "WH_ELI", "PASS"):
+            return "PASS"
         return ""
 
     def _subject_status_dataframe_export(self, df_raw, groups):
@@ -905,6 +909,10 @@ class ResultAnalyzerApp(ctk.CTk):
             pass_count   = int((s == "PASS").sum())
             fail_count   = int((s == "FAIL").sum())
             absent_count = int((s == "ABSENT").sum())
+            # Also count students with no determined subject status
+            # (e.g. Wh_Eli / ELIGIBLE students who have overall result)
+            other_count  = int((s == "").sum())
+            # Only add other_count if they have a valid overall result
             total_count  = pass_count + fail_count + absent_count
 
             rows.append({

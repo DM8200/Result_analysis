@@ -2,13 +2,13 @@
 license_client.py  –  Online License Activation for College Result Analyzer
 
 HOW IT WORKS:
-  Windows/Mac → GUI activation dialog (tkinter)
+  Windows/Mac → GUI activation dialog
   Linux       → Terminal activation (no tkinter = no segfault)
 
-On Linux first run:
-  1. Run: ResultAnalyzer --activate
-  2. Enter your license key
-  3. Then run: ResultAnalyzer  (opens normally)
+FIXES:
+  - Python 3.13 tkinter thread error fixed
+  - Uses single persistent root window throughout
+  - Proper cleanup to avoid gc thread errors
 """
 
 from __future__ import annotations
@@ -23,8 +23,7 @@ CURRENT_VERSION = "1.0.0"
 TIMEOUT         = 10
 # ───────────────────────────────────────────────────────────────────────────
 
-IS_LINUX   = sys.platform.startswith("linux")
-IS_FROZEN  = getattr(sys, "frozen", False)
+IS_LINUX = sys.platform.startswith("linux")
 
 _REACTIVATE_MESSAGES = {
     "license revoked",
@@ -72,7 +71,7 @@ def _post(endpoint: str, payload: dict) -> dict:
         )
         return r.json()
     except requests.exceptions.ConnectionError:
-        return {"status": "error", "message": "Cannot reach license server. Check internet.", "type": "network"}
+        return {"status": "error", "message": "Cannot reach license server.\nCheck your internet connection.", "type": "network"}
     except Exception as e:
         return {"status": "error", "message": str(e), "type": "network"}
 
@@ -83,7 +82,6 @@ def _should_reactivate(message: str) -> bool:
 # ─────────────────────── Linux Terminal Activation ─────────────────────────
 
 def _linux_activate() -> None:
-    """Activate via terminal — no tkinter needed."""
     print("\n" + "="*55)
     print(f"  {APP_NAME}")
     print("  License Activation")
@@ -93,210 +91,211 @@ def _linux_activate() -> None:
         if not key:
             print("\n  No key entered. Exiting.")
             sys.exit(1)
-
         print("\n  Activating, please wait...")
         resp = _post("activate", {"key": key, "machine_id": _machine_id()})
-
         if resp.get("status") == "ok":
-            college = resp.get("college", "")
-            _save_license(key, college)
+            _save_license(key, resp.get("college", ""))
             print(f"\n  Activation successful!")
-            print(f"  College : {college}")
+            print(f"  College : {resp.get('college', '')}")
             print(f"  Plan    : {resp.get('plan', '')}")
             print(f"\n  Now run: ResultAnalyzer")
             print("="*55 + "\n")
             sys.exit(0)
         else:
             print(f"\n  Error: {resp.get('message', 'Activation failed')}")
-            print("="*55 + "\n")
             sys.exit(1)
-
     except KeyboardInterrupt:
         print("\n\n  Cancelled.")
         sys.exit(1)
 
-
-def _linux_validate(saved_key: str) -> bool:
-    """Validate silently on Linux — returns True if valid."""
+def _linux_validate(saved_key: str) -> None:
     resp = _post("validate", {"key": saved_key, "machine_id": _machine_id()})
     if resp.get("status") == "ok":
-        college = resp.get("college", "")
-        _save_license(saved_key, college)
-        return True
-
+        _save_license(saved_key, resp.get("college", ""))
+        return
     msg      = resp.get("message", "")
     err_type = resp.get("type", "")
-
     if err_type == "network":
-        # No internet — allow app to open
-        print(f"WARNING: Cannot reach license server. {msg}", file=sys.stderr)
-        return True
-
+        return  # Allow app to open offline
     if _should_reactivate(msg):
         _clear_license()
         print(f"\n  License Error: {msg}", file=sys.stderr)
         print(f"  Please re-activate: ResultAnalyzer --activate", file=sys.stderr)
         sys.exit(1)
-
     print(f"  License Error: {msg}", file=sys.stderr)
     sys.exit(1)
 
 
-# ─────────────────────── Windows/Mac GUI Activation ────────────────────────
+# ─────────────────────── Windows GUI Activation ────────────────────────────
 
-def _gui_activate(message: str = "") -> None:
-    """GUI activation dialog for Windows/Mac."""
+def _run_gui_license() -> None:
+    """
+    Run the complete license GUI flow.
+    Creates ONE tkinter root, handles everything, then destroys it.
+    This avoids the Python 3.13 threading/gc error.
+    """
     import tkinter as tk
     from tkinter import messagebox
-    import gc
 
-    class _Dialog(tk.Toplevel):
-        def __init__(self, parent):
-            super().__init__(parent)
-            self.activated = False
-            self.college   = ""
-            self.title(f"{APP_NAME} – Activation")
-            self.resizable(False, False)
-            self.configure(bg="#0F172A")
-            self.grab_set()
-            self.protocol("WM_DELETE_WINDOW", self._close)
-
-            w, h = 480, 320 if message else 280
-            sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-            self.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
-
-            tk.Label(self, text="⚡ " + APP_NAME,
-                     bg="#0F172A", fg="#F8FAFC",
-                     font=("Segoe UI", 18, "bold")).pack(pady=(24, 2))
-
-            if message:
-                tk.Label(self, text=f"⚠  {message}",
-                         bg="#3B0A0A", fg="#FCA5A5",
-                         font=("Segoe UI", 10, "bold"),
-                         wraplength=420, justify="center",
-                         padx=10, pady=8).pack(fill="x", padx=30, pady=(4, 4))
-                tk.Label(self, text="Please enter your new license key.",
-                         bg="#0F172A", fg="#94A3B8",
-                         font=("Segoe UI", 11)).pack(pady=(4, 12))
-            else:
-                tk.Label(self, text="Please enter your license key to activate.",
-                         bg="#0F172A", fg="#94A3B8",
-                         font=("Segoe UI", 11)).pack(pady=(0, 16))
-
-            tk.Label(self, text="License Key",
-                     bg="#0F172A", fg="#CBD5E1",
-                     font=("Segoe UI", 10, "bold"),
-                     anchor="w").pack(fill="x", padx=40)
-
-            self._kv = tk.StringVar()
-            e = tk.Entry(self, textvariable=self._kv,
-                         font=("Courier New", 13),
-                         bg="#1E293B", fg="#38BDF8",
-                         insertbackground="#38BDF8",
-                         relief="flat", bd=6, width=34,
-                         justify="center")
-            e.pack(padx=40, ipady=6)
-            e.focus_set()
-            e.bind("<Return>", lambda _: self._activate())
-
-            self._sv = tk.StringVar(value="")
-            tk.Label(self, textvariable=self._sv,
-                     bg="#0F172A", fg="#F97316",
-                     font=("Segoe UI", 10)).pack(pady=(8, 0))
-
-            tk.Button(self, text="  Activate  ",
-                      command=self._activate,
-                      bg="#2563EB", fg="white",
-                      activebackground="#1D4ED8",
-                      font=("Segoe UI", 12, "bold"),
-                      relief="flat", bd=0,
-                      padx=18, pady=8,
-                      cursor="hand2").pack(pady=(10, 0))
-
-        def _close(self):
-            self.activated = False
-            self.destroy()
-
-        def _activate(self):
-            key = self._kv.get().strip().upper()
-            if not key:
-                self._sv.set("⚠  Please enter a license key.")
-                return
-            self._sv.set("🔄  Activating, please wait…")
-            self.update_idletasks()
-            resp = _post("activate", {"key": key, "machine_id": _machine_id()})
-            if resp.get("status") == "ok":
-                self.college   = resp.get("college", "")
-                self.activated = True
-                _save_license(key, self.college)
-                self.destroy()
-            else:
-                self._sv.set(f"✖  {resp.get('message', 'Activation failed.')}")
-
+    # ── Create single persistent root ──
     root = tk.Tk()
     root.withdraw()
-    dlg = _Dialog(root)
+    root.title(APP_NAME)
 
-    def _check():
-        if dlg.winfo_exists():
-            root.after(100, _check)
+    saved     = _load_license()
+    saved_key = saved.get("key")
+
+    if saved_key:
+        # ── Validate existing key ──
+        resp = _post("validate", {"key": saved_key, "machine_id": _machine_id()})
+
+        if resp.get("status") == "ok":
+            _save_license(saved_key, resp.get("college", saved.get("college", "")))
+            _check_for_updates_gui(root)
+            root.destroy()
+            return
+
+        msg      = resp.get("message", "Unknown error")
+        err_type = resp.get("type", "")
+
+        if err_type == "network":
+            messagebox.showwarning(
+                APP_NAME + " – No Connection",
+                f"Could not reach license server.\n\n{msg}\n\nThe app will open anyway.",
+                parent=root,
+            )
+            root.destroy()
+            return
+
+        if _should_reactivate(msg):
+            _clear_license()
+            saved_key = None  # Fall through to activation dialog
         else:
-            root.quit()
+            messagebox.showerror(
+                APP_NAME + " – License Error",
+                f"License check failed:\n\n{msg}\n\nContact support.",
+                parent=root,
+            )
+            root.destroy()
+            sys.exit(1)
 
-    root.after(100, _check)
-    root.mainloop()
-    activated = getattr(dlg, "activated", False)
-    try: root.destroy()
-    except Exception: pass
-    gc.collect()
+    if not saved_key:
+        # ── Show activation dialog ──
+        _show_activation_dialog(root, message="" if not saved else
+            _load_license().get("_last_error", ""))
+        root.destroy()
 
-    if not activated:
+
+def _show_activation_dialog(root, message: str = "") -> None:
+    """Show activation dialog using existing root window."""
+    import tkinter as tk
+
+    activated = [False]  # Use list to allow mutation in nested function
+
+    dialog = tk.Toplevel(root)
+    dialog.title(f"{APP_NAME} – Activation")
+    dialog.resizable(False, False)
+    dialog.configure(bg="#0F172A")
+    dialog.grab_set()
+    dialog.protocol("WM_DELETE_WINDOW", lambda: _on_close(dialog, activated, root))
+
+    w, h = 480, 320 if message else 280
+    sw = dialog.winfo_screenwidth()
+    sh = dialog.winfo_screenheight()
+    dialog.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
+
+    tk.Label(
+        dialog, text="⚡ " + APP_NAME,
+        bg="#0F172A", fg="#F8FAFC",
+        font=("Segoe UI", 18, "bold"),
+    ).pack(pady=(24, 2))
+
+    if message:
+        tk.Label(
+            dialog, text=f"⚠  {message}",
+            bg="#3B0A0A", fg="#FCA5A5",
+            font=("Segoe UI", 10, "bold"),
+            wraplength=420, justify="center",
+            padx=10, pady=8,
+        ).pack(fill="x", padx=30, pady=(4, 4))
+        tk.Label(
+            dialog, text="Please enter your new license key.",
+            bg="#0F172A", fg="#94A3B8",
+            font=("Segoe UI", 11),
+        ).pack(pady=(4, 12))
+    else:
+        tk.Label(
+            dialog, text="Please enter your license key to activate.",
+            bg="#0F172A", fg="#94A3B8",
+            font=("Segoe UI", 11),
+        ).pack(pady=(0, 16))
+
+    tk.Label(
+        dialog, text="License Key",
+        bg="#0F172A", fg="#CBD5E1",
+        font=("Segoe UI", 10, "bold"),
+        anchor="w",
+    ).pack(fill="x", padx=40)
+
+    key_var = tk.StringVar()
+    entry = tk.Entry(
+        dialog, textvariable=key_var,
+        font=("Courier New", 13),
+        bg="#1E293B", fg="#38BDF8",
+        insertbackground="#38BDF8",
+        relief="flat", bd=6, width=34,
+        justify="center",
+    )
+    entry.pack(padx=40, ipady=6)
+    entry.focus_set()
+
+    status_var = tk.StringVar(value="")
+    tk.Label(
+        dialog, textvariable=status_var,
+        bg="#0F172A", fg="#F97316",
+        font=("Segoe UI", 10),
+    ).pack(pady=(8, 0))
+
+    def _do_activate():
+        key = key_var.get().strip().upper()
+        if not key:
+            status_var.set("⚠  Please enter a license key.")
+            return
+        status_var.set("🔄  Activating, please wait…")
+        dialog.update_idletasks()
+        resp = _post("activate", {"key": key, "machine_id": _machine_id()})
+        if resp.get("status") == "ok":
+            _save_license(key, resp.get("college", ""))
+            activated[0] = True
+            dialog.destroy()
+        else:
+            status_var.set(f"✖  {resp.get('message', 'Activation failed.')}")
+
+    entry.bind("<Return>", lambda e: _do_activate())
+
+    tk.Button(
+        dialog, text="  Activate  ",
+        command=_do_activate,
+        bg="#2563EB", fg="white",
+        activebackground="#1D4ED8",
+        font=("Segoe UI", 12, "bold"),
+        relief="flat", bd=0, padx=18, pady=8,
+        cursor="hand2",
+    ).pack(pady=(10, 0))
+
+    root.wait_window(dialog)
+
+    if not activated[0]:
+        root.destroy()
         sys.exit(0)
 
 
-def _gui_validate(saved_key: str) -> None:
-    """Validate with GUI error dialogs for Windows/Mac."""
-    import tkinter as tk
-    from tkinter import messagebox
-
-    resp = _post("validate", {"key": saved_key, "machine_id": _machine_id()})
-
-    if resp.get("status") == "ok":
-        college = resp.get("college", "")
-        _save_license(saved_key, college)
-        _check_for_updates()
-        return
-
-    msg      = resp.get("message", "Unknown error")
-    err_type = resp.get("type", "")
-
-    if err_type == "network":
-        _tmp = tk.Tk(); _tmp.withdraw()
-        messagebox.showwarning(APP_NAME + " – No Connection",
-                               f"Could not reach license server.\n\n{msg}\n\n"
-                               "The app will open anyway.",
-                               parent=_tmp)
-        _tmp.destroy()
-        return
-
-    if _should_reactivate(msg):
-        _clear_license()
-        _gui_activate(message=msg)
-        return
-
-    _tmp = tk.Tk(); _tmp.withdraw()
-    messagebox.showerror(APP_NAME + " – License Error",
-                         f"License check failed:\n\n{msg}\n\nContact support.",
-                         parent=_tmp)
-    _tmp.destroy()
-    sys.exit(1)
+def _on_close(dialog, activated, root):
+    activated[0] = False
+    dialog.destroy()
 
 
-# ─────────────────────── Update Checker ────────────────────────────────────
-
-def _check_for_updates() -> None:
-    if IS_LINUX:
-        return  # Skip update popup on Linux to avoid tkinter issues
+def _check_for_updates_gui(root) -> None:
     try:
         import tkinter as tk
         from tkinter import messagebox
@@ -307,12 +306,12 @@ def _check_for_updates() -> None:
         msg     = data.get("message", "A new version is available!")
         if latest == CURRENT_VERSION:
             return
-        _tmp = tk.Tk(); _tmp.withdraw()
-        if messagebox.askyesno(APP_NAME + " – Update Available",
-                               f"New version {latest} available!\n\n{msg}\n\n"
-                               "Open download page?", parent=_tmp):
+        if messagebox.askyesno(
+            APP_NAME + " – Update Available",
+            f"New version {latest} available!\n\n{msg}\n\nOpen download page?",
+            parent=root,
+        ):
             webbrowser.open(dl)
-        _tmp.destroy()
     except Exception:
         pass
 
@@ -321,18 +320,15 @@ def _check_for_updates() -> None:
 
 def check_license() -> None:
     """
-    Call once at the top of app.py before building the GUI.
+    Call once at the top of app.py BEFORE building the GUI.
 
-    Linux flow:
-      - First time → user must run: ResultAnalyzer --activate
-      - After that → validates silently, app opens normally
+    Linux:   first run → ResultAnalyzer --activate
+             after that → validates silently
 
-    Windows/Mac flow:
-      - First time → GUI dialog appears
-      - After that → validates silently, app opens normally
+    Windows: first run → GUI activation dialog
+             after that → validates silently
     """
-
-    # ── Linux: handle --activate flag ──
+    # Linux --activate flag
     if IS_LINUX and "--activate" in sys.argv:
         _linux_activate()
         return
@@ -340,7 +336,7 @@ def check_license() -> None:
     saved     = _load_license()
     saved_key = saved.get("key")
 
-    # ── Linux flow ──
+    # Linux flow — terminal only
     if IS_LINUX:
         if not saved_key:
             print("\n" + "="*55, file=sys.stderr)
@@ -353,8 +349,5 @@ def check_license() -> None:
         _linux_validate(saved_key)
         return
 
-    # ── Windows / Mac flow ──
-    if not saved_key:
-        _gui_activate()
-        return
-    _gui_validate(saved_key)
+    # Windows/Mac flow — GUI
+    _run_gui_license()

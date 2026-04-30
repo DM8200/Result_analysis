@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
@@ -134,7 +133,7 @@ def _extract_name_from_line(line:str)->Tuple[str,str]:
 
 def _extract_right_panel_metrics(block_lines:List[str]):
     first_line=block_lines[0].upper() if block_lines else ""
-    result="PASS" if re.search(r"\bPASS\b", first_line) else "FAIL" if re.search(r"\bFAIL\b", first_line) else "ABSENT" if re.search(r"\bABSENT\b", first_line) else "UNKNOWN"
+    result="PASS" if re.search(r"\bPASS\b", first_line) else "FAIL" if re.search(r"\bFAIL\b", first_line) else "ABSENT" if re.search(r"\bABSENT\b", first_line) else "ELIGIBLE" if re.search(r"\bWH[_\s]ELI\b|\bELIGIBLE\b|\bWHOLE\s*ELI\b", first_line, re.I) else "UNKNOWN"
     block_text="\n".join(block_lines).upper()
     m=re.search(r"(\d+)\s*/\s*550", block_text); total_550=m.group(1) if m else ""
     m=re.search(r"(\d+(?:\.\d+)?)\s*%", block_text); percentage=m.group(1) if m else ""
