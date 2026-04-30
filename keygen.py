@@ -21,8 +21,8 @@ ADMIN_TOKEN  = "Darshan949158"                               # ← your ADMIN_TO
 # ─────────────────── EMAIL CONFIG – configure for auto-sending keys ───────────
 SMTP_SERVER  = "smtp.gmail.com"                              # ← Gmail SMTP server
 SMTP_PORT    = 587                                           # ← Gmail port (TLS)
-SENDER_EMAIL = "darshan.m@raoinformationtechnology.com"                        # ← Your email address
-SENDER_PASS  = "quxoulqqpboeeafg"                           # ← Gmail app password (NOT regular password)
+SENDER_EMAIL = "darshan.m@raoinformationtechnology.com"      # ← Your email address
+SENDER_PASS  = "quxoulqqpboeeafg"                            # ← Gmail app password (NOT regular password)
 # ───────────────────────────────────────────────────────────────────────────
 
 TIMEOUT = 10

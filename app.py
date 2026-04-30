@@ -902,12 +902,17 @@ class ResultAnalyzerApp(ctk.CTk):
                         subject_max = 100.0
                 pass_avg = round((avg_marks / subject_max) * 100, 2) if subject_max else round(avg_marks, 2)
 
+            pass_count   = int((s == "PASS").sum())
+            fail_count   = int((s == "FAIL").sum())
+            absent_count = int((s == "ABSENT").sum())
+            total_count  = pass_count + fail_count + absent_count
+
             rows.append({
                 "Subject": info["display_name"],
-                "Pass": int((s == "PASS").sum()),
-                "Fail": int((s == "FAIL").sum()),
-                "Absent": int((s == "ABSENT").sum()),
-                "Total Students": len(df2),
+                "Pass": pass_count,
+                "Fail": fail_count,
+                "Absent": absent_count,
+                "Total Students": total_count,
                 "Passing Student Avg. %": pass_avg
             })
         return pd.DataFrame(rows)
