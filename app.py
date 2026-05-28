@@ -7,6 +7,7 @@ check_license()
 
 import os
 import sys
+import subprocess
 import threading
 from typing import Dict, List
 
@@ -91,6 +92,20 @@ def force_maximize_window(root):
             root.geometry(f"{sw}x{sh}+0+0")
     except Exception:
         pass
+
+
+def open_path_with_default_app(path: str) -> bool:
+    """Open a file path with the OS default app in a cross-platform way."""
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(path)  # type: ignore[attr-defined]
+        elif sys.platform.startswith("darwin"):
+            subprocess.run(["open", path], check=False)
+        else:
+            subprocess.run(["xdg-open", path], check=False)
+        return True
+    except Exception:
+        return False
 
 
 class StatCard(ctk.CTkFrame):
@@ -889,31 +904,13 @@ class ResultAnalyzerApp(ctk.CTk):
         rows = []
         for info in self._subject_info_list_export(groups):
             s = df2.get(info["status_col"], pd.Series(dtype=str)).astype(str).str.upper()
-            passed_marks = pd.to_numeric(df2.loc[s == "PASS", info["tot_col"]], errors="coerce")
-
-            pass_avg = ""
-            if not passed_marks.empty:
-                avg_marks = float(passed_marks.mean())
-                all_marks = pd.to_numeric(df2[info["tot_col"]], errors="coerce")
-                max_seen = all_marks.max()
-                subject_max = None
-                if pd.notna(max_seen):
-                    if max_seen <= 50:
-                        subject_max = 50.0
-                    elif max_seen <= 70:
-                        subject_max = 70.0
-                    else:
-                        subject_max = 100.0
-                pass_avg = round((avg_marks / subject_max) * 100, 2) if subject_max else round(avg_marks, 2)
 
             pass_count   = int((s == "PASS").sum())
             fail_count   = int((s == "FAIL").sum())
             absent_count = int((s == "ABSENT").sum())
-            # Also count students with no determined subject status
-            # (e.g. Wh_Eli / ELIGIBLE students who have overall result)
-            other_count  = int((s == "").sum())
-            # Only add other_count if they have a valid overall result
-            total_count  = pass_count + fail_count + absent_count
+            # Keep denominator aligned with "Total Students" in CR report.
+            total_count  = len(s)
+            pass_avg = round((pass_count / total_count) * 100, 2) if total_count > 0 else ""
 
             rows.append({
                 "Subject": info["display_name"],
@@ -1044,10 +1041,7 @@ class ResultAnalyzerApp(ctk.CTk):
                         # Freeze header rows
                         ws.freeze_panes = 'A4'
 
-            try:
-                os.startfile(out)
-            except Exception:
-                pass
+            open_path_with_default_app(out)
             messagebox.showinfo("Export", f"Excel exported successfully:\n{out}")
         except Exception as e:
             messagebox.showerror("Export Error", str(e))

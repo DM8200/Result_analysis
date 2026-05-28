@@ -35,6 +35,17 @@ _REACTIVATE_MESSAGES = {
 }
 
 
+def _linux_activation_command() -> str:
+    """
+    Build a practical activation command for Linux users.
+    Uses script invocation when running from source, otherwise app command.
+    """
+    argv0 = os.path.basename(sys.argv[0] or "").lower()
+    if argv0.endswith(".py"):
+        return f'python3 "{sys.argv[0]}" --activate'
+    return "ResultAnalyzer --activate"
+
+
 # ─────────────────────── Core helpers ──────────────────────────────────────
 
 def _machine_id() -> str:
@@ -98,7 +109,7 @@ def _linux_activate() -> None:
             print(f"\n  Activation successful!")
             print(f"  College : {resp.get('college', '')}")
             print(f"  Plan    : {resp.get('plan', '')}")
-            print(f"\n  Now run: ResultAnalyzer")
+            print(f"\n  Now run the app normally.")
             print("="*55 + "\n")
             sys.exit(0)
         else:
@@ -120,7 +131,7 @@ def _linux_validate(saved_key: str) -> None:
     if _should_reactivate(msg):
         _clear_license()
         print(f"\n  License Error: {msg}", file=sys.stderr)
-        print(f"  Please re-activate: ResultAnalyzer --activate", file=sys.stderr)
+        print(f"  Please re-activate: {_linux_activation_command()}", file=sys.stderr)
         sys.exit(1)
     print(f"  License Error: {msg}", file=sys.stderr)
     sys.exit(1)
@@ -344,7 +355,7 @@ def check_license() -> None:
             print("  ACTIVATION REQUIRED", file=sys.stderr)
             print("="*55, file=sys.stderr)
             print("\n  Please activate first:", file=sys.stderr)
-            print("  ResultAnalyzer --activate\n", file=sys.stderr)
+            print(f"  {_linux_activation_command()}\n", file=sys.stderr)
             sys.exit(1)
         _linux_validate(saved_key)
         return

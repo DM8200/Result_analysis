@@ -27,6 +27,8 @@ def _safe_text(page):
 def _to_int_token(tok:str)->Optional[int]:
     if tok is None: return None
     t=str(tok).strip().upper()
+    if re.fullmatch(r"\(\d{1,3}\)", t):
+        t = t[1:-1]
     if not t or t in SPECIAL_ABSENT: return None
     if t in SPECIAL_ZERO: return 0
     if t.isdigit():
@@ -149,7 +151,9 @@ def _collect_mark_tokens(line:str,label:str,needed:int)->List[str]:
     vals=[]
     for tok in line[pos+len(label):].split():
         up=tok.strip().upper()
-        if re.fullmatch(r"(AB|AL|ZOO|\d{1,3})", up):
+        if re.fullmatch(r"(AB|AL|ZOO|\d{1,3}|\(\d{1,3}\))", up):
+            if up.startswith("(") and up.endswith(")"):
+                up = up[1:-1]
             vals.append(up)
             if len(vals)>=needed: break
     return vals
