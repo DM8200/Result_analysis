@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-# ── License check (runs FIRST, before any GUI opens) ────────────────────────
-from license_client import check_license, get_college_name
-check_license()
-# ────────────────────────────────────────────────────────────────────────────
-
 import os
 import sys
 import subprocess
@@ -801,12 +796,15 @@ class ResultAnalyzerApp(ctk.CTk):
                 f"{pref}_int_total",
                 f"{pref}_pra_total",
                 f"{pref}_total",
+                bool(s.get("the", True)),
+                bool(s.get("int", True)),
+                bool(s.get("pra", False)),
             ))
         return groups
 
     def _subject_info_list_export(self, groups):
         out = []
-        for meta_name, cs_num, col_the, col_int, col_pra, col_tot in groups:
+        for meta_name, cs_num, col_the, col_int, col_pra, col_tot, has_the, has_int, has_pra in groups:
             pref = col_tot[:-6] if col_tot.endswith("_total") else ""
             display_name = meta_name or (cs_num if cs_num else pref.upper())
             out.append({
@@ -817,6 +815,9 @@ class ResultAnalyzerApp(ctk.CTk):
                 "tot_col": col_tot,
                 "grade_col": f"{pref}_grade_token",
                 "status_col": f"{col_tot}_status",
+                "has_the": has_the,
+                "has_int": has_int,
+                "has_pra": has_pra,
             })
         return out
 
@@ -826,7 +827,7 @@ class ResultAnalyzerApp(ctk.CTk):
 
         the_v = norm(row.get(info["the_col"], ""))
         int_v = norm(row.get(info["int_col"], ""))
-        pra_v = norm(row.get(info["pra_col"], "")) if info["pra_col"] else ""
+        pra_v = norm(row.get(info["pra_col"], "")) if info.get("has_pra") and info["pra_col"] else ""
         grade_v = norm(row.get(info["grade_col"], ""))
 
         if the_v in ("AB", "A B", "AL", "ABSENT") or int_v in ("AB", "A B", "AL", "ABSENT") or pra_v in ("AB", "A B", "AL", "ABSENT") or grade_v == "AB":
@@ -862,12 +863,12 @@ class ResultAnalyzerApp(ctk.CTk):
 
         for info in self._subject_info_list_export(groups):
             disp = info["display_name"]
-            out[f"{disp} (THE TOTAL)"] = df2.get(info["the_col"], "")
-            out[f"{disp} (INT TOTAL)"] = df2.get(info["int_col"], "")
-            if info["pra_col"] in df2.columns:
-                pra_series = df2.get(info["pra_col"], "")
-                if pd.Series(pra_series).astype(str).str.strip().ne("").any():
-                    out[f"{disp} (PRA TOTAL)"] = pra_series
+            if info["has_the"]:
+                out[f"{disp} (THE TOTAL)"] = df2.get(info["the_col"], "")
+            if info["has_int"]:
+                out[f"{disp} (INT TOTAL)"] = df2.get(info["int_col"], "")
+            if info["has_pra"] and info["pra_col"] in df2.columns:
+                out[f"{disp} (PRA TOTAL)"] = df2.get(info["pra_col"], "")
             out[f"{disp} (Total Marks)"] = df2.get(info["tot_col"], "")
             out[f"{disp} (Grade Token)"] = df2.get(info["grade_col"], "")
             out[f"{disp} (Status)"] = df2.get(info["status_col"], "")
@@ -937,109 +938,90 @@ class ResultAnalyzerApp(ctk.CTk):
 
         try:
             groups = self._subject_groups()
-            college = get_college_name()
+            from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+            from openpyxl.utils import get_column_letter
+
+            HEADER_TEXT = "FFFFFF"
+            SUBHEADER_BG = "4472C4"
+            TITLE_BG = "D9E8F5"
+            ROW_ALT_BG = "E7F0F7"
+            PASS_BG = "C6EFCE"
+            FAIL_BG = "FFC7CE"
+
+            thin_border = Border(
+                left=Side(style="thin", color="B4C7E7"),
+                right=Side(style="thin", color="B4C7E7"),
+                top=Side(style="thin", color="B4C7E7"),
+                bottom=Side(style="thin", color="B4C7E7"),
+            )
 
             with pd.ExcelWriter(out, engine="openpyxl") as writer:
-                self._build_students_sheet(self.df, groups).to_excel(writer, index=False, sheet_name="Students", startrow=3)
-                self._build_top10_sheet(self.df, groups).to_excel(writer, index=False, sheet_name="Top10", startrow=3)
-                self._build_subjectwise_sheet(self.df, groups).to_excel(writer, index=False, sheet_name="SubjectWise", startrow=3)
+                self._build_students_sheet(self.df, groups).to_excel(writer, index=False, sheet_name="Students", startrow=2)
+                self._build_top10_sheet(self.df, groups).to_excel(writer, index=False, sheet_name="Top10", startrow=2)
+                self._build_subjectwise_sheet(self.df, groups).to_excel(writer, index=False, sheet_name="SubjectWise", startrow=2)
 
-                # Enhanced formatting for each sheet
-                if college:
-                    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-                    from openpyxl.utils import get_column_letter
-                    
-                    # Define professional colors
-                    HEADER_BG = "1E3A5F"  # Dark blue
-                    HEADER_TEXT = "FFFFFF"  # White
-                    SUBHEADER_BG = "4472C4"  # Medium blue
-                    TITLE_BG = "D9E8F5"  # Light blue
-                    TITLE_TEXT = "1E3A5F"
-                    ROW_ALT_BG = "E7F0F7"  # Very light blue for alternating rows
-                    PASS_BG = "C6EFCE"  # Light green
-                    FAIL_BG = "FFC7CE"  # Light red
-                    
-                    thin_border = Border(
-                        left=Side(style='thin', color='B4C7E7'),
-                        right=Side(style='thin', color='B4C7E7'),
-                        top=Side(style='thin', color='B4C7E7'),
-                        bottom=Side(style='thin', color='B4C7E7')
-                    )
-                    
-                    for sheet_name in ["Students", "Top10", "SubjectWise"]:
-                        ws = writer.sheets[sheet_name]
-                        
-                        # Row 1 — College name (big, bold, dark blue background)
-                        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max(ws.max_column, 8))
-                        cell = ws.cell(row=1, column=1)
-                        cell.value = college.upper()
-                        cell.font = Font(name="Calibri", size=18, bold=True, color=HEADER_TEXT)
-                        cell.alignment = Alignment(horizontal="center", vertical="center")
-                        cell.fill = PatternFill(start_color=HEADER_BG, end_color=HEADER_BG, fill_type="solid")
-                        ws.row_dimensions[1].height = 32
-                        
-                        # Row 2 — Sheet title (e.g. "Students Report")
-                        title_map = {
-                            "Students":    "STUDENTS RESULT REPORT",
-                            "Top10":       "TOP 10 STUDENTS REPORT",
-                            "SubjectWise": "SUBJECT WISE ANALYSIS REPORT",
-                        }
-                        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max(ws.max_column, 8))
-                        cell2 = ws.cell(row=2, column=1)
-                        cell2.value = title_map.get(sheet_name, sheet_name)
-                        cell2.font = Font(name="Calibri", size=14, bold=True, color=HEADER_TEXT)
-                        cell2.alignment = Alignment(horizontal="center", vertical="center")
-                        cell2.fill = PatternFill(start_color=SUBHEADER_BG, end_color=SUBHEADER_BG, fill_type="solid")
-                        ws.row_dimensions[2].height = 26
-                        
-                        # Format header row (Row 3)
-                        header_row = 3
+                title_map = {
+                    "Students": "STUDENTS RESULT REPORT",
+                    "Top10": "TOP 10 STUDENTS REPORT",
+                    "SubjectWise": "SUBJECT WISE ANALYSIS REPORT",
+                }
+
+                for sheet_name in ["Students", "Top10", "SubjectWise"]:
+                    ws = writer.sheets[sheet_name]
+
+                    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max(ws.max_column, 8))
+                    title_cell = ws.cell(row=1, column=1)
+                    title_cell.value = title_map.get(sheet_name, sheet_name)
+                    title_cell.font = Font(name="Calibri", size=14, bold=True, color=HEADER_TEXT)
+                    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+                    title_cell.fill = PatternFill(start_color=SUBHEADER_BG, end_color=SUBHEADER_BG, fill_type="solid")
+                    ws.row_dimensions[1].height = 26
+
+                    header_row = 2
+                    for col_idx in range(1, ws.max_column + 1):
+                        cell = ws.cell(row=header_row, column=col_idx)
+                        cell.font = Font(name="Calibri", size=11, bold=True, color=HEADER_TEXT)
+                        cell.fill = PatternFill(start_color=TITLE_BG, end_color=TITLE_BG, fill_type="solid")
+                        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                        cell.border = thin_border
+                    ws.row_dimensions[header_row].height = 24
+
+                    for row_idx in range(3, ws.max_row + 1):
+                        row_fill = (
+                            PatternFill(start_color=ROW_ALT_BG, end_color=ROW_ALT_BG, fill_type="solid")
+                            if (row_idx - 3) % 2 == 0
+                            else PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+                        )
+
                         for col_idx in range(1, ws.max_column + 1):
-                            cell = ws.cell(row=header_row, column=col_idx)
-                            cell.font = Font(name="Calibri", size=11, bold=True, color=HEADER_TEXT)
-                            cell.fill = PatternFill(start_color=TITLE_BG, end_color=TITLE_BG, fill_type="solid")
-                            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                            cell = ws.cell(row=row_idx, column=col_idx)
                             cell.border = thin_border
-                        ws.row_dimensions[3].height = 24
-                        
-                        # Format data rows with alternating colors
-                        for row_idx in range(4, ws.max_row + 1):
-                            # Alternate row colors
-                            row_fill = PatternFill(start_color=ROW_ALT_BG, end_color=ROW_ALT_BG, fill_type="solid") if (row_idx - 4) % 2 == 0 else PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
-                            
-                            for col_idx in range(1, ws.max_column + 1):
-                                cell = ws.cell(row=row_idx, column=col_idx)
-                                cell.border = thin_border
-                                cell.fill = row_fill
-                                cell.font = Font(name="Calibri", size=10)
-                                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-                                
-                                # Apply conditional formatting for Pass/Fail status
-                                cell_value = str(cell.value).upper() if cell.value else ""
-                                if cell_value == "PASS":
-                                    cell.fill = PatternFill(start_color=PASS_BG, end_color=PASS_BG, fill_type="solid")
-                                    cell.font = Font(name="Calibri", size=10, bold=True, color="006100")
-                                elif cell_value == "FAIL":
-                                    cell.fill = PatternFill(start_color=FAIL_BG, end_color=FAIL_BG, fill_type="solid")
-                                    cell.font = Font(name="Calibri", size=10, bold=True, color="9C0006")
-                            
-                            ws.row_dimensions[row_idx].height = 20
-                        
-                        # Auto-adjust column widths
-                        for col_idx, col in enumerate(ws.columns, 1):
-                            max_length = 0
-                            col_letter = get_column_letter(col_idx)
-                            for cell in col:
-                                try:
-                                    if len(str(cell.value or "")) > max_length:
-                                        max_length = len(str(cell.value or ""))
-                                except:
-                                    pass
-                            adjusted_width = min(max_length + 2, 40)
-                            ws.column_dimensions[col_letter].width = adjusted_width
-                        
-                        # Freeze header rows
-                        ws.freeze_panes = 'A4'
+                            cell.fill = row_fill
+                            cell.font = Font(name="Calibri", size=10)
+                            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+                            cell_value = str(cell.value).upper() if cell.value else ""
+                            if cell_value == "PASS":
+                                cell.fill = PatternFill(start_color=PASS_BG, end_color=PASS_BG, fill_type="solid")
+                                cell.font = Font(name="Calibri", size=10, bold=True, color="006100")
+                            elif cell_value == "FAIL":
+                                cell.fill = PatternFill(start_color=FAIL_BG, end_color=FAIL_BG, fill_type="solid")
+                                cell.font = Font(name="Calibri", size=10, bold=True, color="9C0006")
+
+                        ws.row_dimensions[row_idx].height = 20
+
+                    for col_idx, col in enumerate(ws.columns, 1):
+                        max_length = 0
+                        col_letter = get_column_letter(col_idx)
+                        for cell in col:
+                            try:
+                                if len(str(cell.value or "")) > max_length:
+                                    max_length = len(str(cell.value or ""))
+                            except Exception:
+                                pass
+                        ws.column_dimensions[col_letter].width = min(max_length + 2, 40)
+
+                    ws.freeze_panes = "A3"
 
             open_path_with_default_app(out)
             messagebox.showinfo("Export", f"Excel exported successfully:\n{out}")

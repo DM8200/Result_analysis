@@ -167,10 +167,29 @@ def _collect_grade_tokens(line:str,needed:int)->List[str]:
             if len(vals)>=needed: break
     return vals
 
-def _extract_marks_table(block_lines:List[str], subjects:List[SubjectDef]):
+def _document_has_pra_total(text:str)->bool:
+    return bool(re.search(r"\bPRA\s+TOTAL\b", text or "", re.I))
+
+def _subject_slot_flags(name:str, *, has_pra_row:bool)->dict:
+    """Which mark rows apply to each subject when PDF uses a PRA TOTAL line."""
+    if not has_pra_row:
+        return {"the": True, "int": True, "pra": False}
+    u = (name or "").upper()
+    if re.search(r"INTERNSHIP", u):
+        return {"the": False, "int": False, "pra": True}
+    if re.search(r"PRACTICAL|PROJECT|MINI\s*PROJECT", u):
+        return {"the": False, "int": True, "pra": True}
+    return {"the": True, "int": True, "pra": False}
+
+def _slot_indices(subjects:List[SubjectDef], slot:str, *, has_pra_row:bool)->List[int]:
+    return [i for i, s in enumerate(subjects) if _subject_slot_flags(s.name, has_pra_row=has_pra_row)[slot]]
+
+def _extract_marks_table(block_lines:List[str], subjects:List[SubjectDef], *, has_pra_row:bool=False):
     n=len(subjects)
-    has_pra_header=any("PRA TOTAL" in ln.upper() for ln in block_lines)
-    practical_indices=[i for i,s in enumerate(subjects) if re.search(r"PRACTICAL|PROJECT", s.name, re.I)]
+    has_pra_line=has_pra_row or any("PRA TOTAL" in ln.upper() for ln in block_lines)
+    the_idx=_slot_indices(subjects, "the", has_pra_row=has_pra_line)
+    int_idx=_slot_indices(subjects, "int", has_pra_row=has_pra_line)
+    pra_idx=_slot_indices(subjects, "pra", has_pra_row=has_pra_line)
     the_vals=[""]*n; int_vals=[""]*n; pra_vals=[""]*n; tot_vals=[""]*n; grade_vals=[""]*n
     def map_vals(vals,indices):
         out=[""]*n
@@ -180,20 +199,14 @@ def _extract_marks_table(block_lines:List[str], subjects:List[SubjectDef]):
     for idx,ln in enumerate(block_lines):
         u=ln.upper()
         if "THE TOTAL" in u:
-            vals=_collect_mark_tokens(ln,"THE TOTAL",n)
-            if has_pra_header and practical_indices and len(vals)<n:
-                non=[i for i in range(n) if i not in practical_indices]
-                the_vals=map_vals(vals,non)
-            else:
-                the_vals=map_vals(vals,list(range(n)))
+            vals=_collect_mark_tokens(ln,"THE TOTAL",len(the_idx) if has_pra_line else n)
+            the_vals=map_vals(vals, the_idx if has_pra_line else list(range(n)))
         elif "INT TOTAL" in u:
-            int_vals=map_vals(_collect_mark_tokens(ln,"INT TOTAL",n), list(range(n)))
+            vals=_collect_mark_tokens(ln,"INT TOTAL",len(int_idx) if has_pra_line else n)
+            int_vals=map_vals(vals, int_idx if has_pra_line else list(range(n)))
         elif "PRA TOTAL" in u:
-            vals=_collect_mark_tokens(ln,"PRA TOTAL",n)
-            if practical_indices and len(vals)<=len(practical_indices):
-                pra_vals=map_vals(vals, practical_indices)
-            else:
-                pra_vals=map_vals(vals, list(range(n)))
+            vals=_collect_mark_tokens(ln,"PRA TOTAL",len(pra_idx))
+            pra_vals=map_vals(vals, pra_idx)
         elif re.search(r"\bTOT\b", u):
             tot_vals=map_vals(_collect_mark_tokens(ln,"TOT",n), list(range(n))); tot_idx=idx
     if tot_idx>=0:
@@ -206,7 +219,7 @@ def _extract_marks_table(block_lines:List[str], subjects:List[SubjectDef]):
             nums=[v for v in (_to_int_token(x) for x in [the_vals[i],int_vals[i],pra_vals[i]]) if v is not None]
             if nums: tot_vals[i]=str(sum(nums))
             elif all(_token_is_absent(x) or not str(x).strip() for x in [the_vals[i],int_vals[i],pra_vals[i]]): tot_vals[i]="ABSENT"
-    has_pra=any(v for v in pra_vals)
+    has_pra=bool(pra_idx) and any(str(v).strip() for v in pra_vals)
     return the_vals,int_vals,(pra_vals if has_pra else None),tot_vals,grade_vals
 
 def parse_cr_pdf(pdf_path:str, return_meta:bool=False):
@@ -214,6 +227,7 @@ def parse_cr_pdf(pdf_path:str, return_meta:bool=False):
     with pdfplumber.open(pdf_path) as pdf:
         first_text=_safe_text(pdf.pages[0]) if pdf.pages else ""
         subjects=_extract_subjects_from_first_page(first_text)
+        doc_has_pra=_document_has_pra_total(first_text)
         for page in pdf.pages:
             text=_safe_text(page)
             if not text: continue
@@ -228,14 +242,17 @@ def parse_cr_pdf(pdf_path:str, return_meta:bool=False):
                     if not m: continue
                     enroll=m.group(0).upper().strip()
                 result,total_550,percentage,sgpa,cgpa=_extract_right_panel_metrics(block_lines)
-                the_vals,int_vals,pra_vals,tot_vals,grade_vals=_extract_marks_table(block_lines,subjects)
+                the_vals,int_vals,pra_vals,tot_vals,grade_vals=_extract_marks_table(
+                    block_lines, subjects, has_pra_row=doc_has_pra
+                )
                 row={"enrollment_no":enroll,"name":name,"result":result,"total_marks_550":total_550,"percentage":percentage,"sgpa":sgpa,"cgpa":cgpa}
-                has_pra=pra_vals is not None
                 for i,s in enumerate(subjects):
                     pref=s.col_prefix
+                    slots=_subject_slot_flags(s.name, has_pra_row=doc_has_pra)
                     row[f"{pref}_the_total"]=the_vals[i] if i<len(the_vals) else ""
                     row[f"{pref}_int_total"]=int_vals[i] if i<len(int_vals) else ""
-                    if has_pra: row[f"{pref}_pra_total"]=pra_vals[i] if i<len(pra_vals) else ""
+                    if slots["pra"] and pra_vals is not None:
+                        row[f"{pref}_pra_total"]=pra_vals[i] if i<len(pra_vals) else ""
                     row[f"{pref}_total"]=tot_vals[i] if i<len(tot_vals) else ""
                     row[f"{pref}_grade_token"]=grade_vals[i] if i<len(grade_vals) else ""
                 rows.append(row)
@@ -243,5 +260,17 @@ def parse_cr_pdf(pdf_path:str, return_meta:bool=False):
     if not df.empty and "enrollment_no" in df.columns:
         df["__name_len"]=df["name"].astype(str).str.len()
         df=df.sort_values(["enrollment_no","__name_len"],ascending=[True,False]).drop_duplicates(subset=["enrollment_no"],keep="first").drop(columns=["__name_len"],errors="ignore").reset_index(drop=True)
-    meta={"pdf_path":pdf_path,"subjects":[{"name":s.name,"cs_num":s.cs_num,"col_prefix":s.col_prefix} for s in subjects]}
+    meta={
+        "pdf_path": pdf_path,
+        "has_pra_row": doc_has_pra,
+        "subjects": [
+            {
+                "name": s.name,
+                "cs_num": s.cs_num,
+                "col_prefix": s.col_prefix,
+                **_subject_slot_flags(s.name, has_pra_row=doc_has_pra),
+            }
+            for s in subjects
+        ],
+    }
     return (df,meta) if return_meta else df

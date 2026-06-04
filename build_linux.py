@@ -10,7 +10,7 @@ import os, sys, shutil, subprocess
 APP_NAME  = "ResultAnalyzer"
 DEB_NAME  = "result-analyzer"
 VERSION   = "1.0.0"
-PY_FILES  = ["app.py", "pdf_parser.py", "license_client.py"]
+PY_FILES  = ["app.py", "pdf_parser.py"]
 
 print("\n[1/3] Checking files...")
 for f in PY_FILES:
